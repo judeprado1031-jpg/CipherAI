@@ -1,0 +1,6 @@
+{
+  "name": "Cipher - Business Math & Financial AI Assistant",
+  "description": "Intelligent personal assistant for business math, corporate finance, and advanced quantitative calculations with pedagogical Teach-Me and Direct-Answer modes, review center, and cloud sync.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
