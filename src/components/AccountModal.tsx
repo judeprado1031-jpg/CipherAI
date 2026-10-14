@@ -86,23 +86,23 @@ export const AccountModal: React.FC<AccountModalProps> = ({
     {
       name: 'Jude Prado',
       email: 'judeprado1031@gmail.com',
+      role: 'Business Student',
+      isPro: false,
+      authProvider: 'google' as const,
+    },
+    {
+      name: 'Lester Cumabig',
+      email: 'lestercumabig262@gmail.com',
       role: 'Financial Analyst',
       isPro: false,
       authProvider: 'google' as const,
     },
     {
-      name: 'Sarah Lin',
-      email: 'sarah.lin@corporate-cfo.com',
-      role: 'CFO & VP of Finance',
-      isPro: true,
+      name: 'Hyacinth Salvador',
+      email: 'hyasalvador702@gmail.com',
+      role: 'Accountancy Scholar',
+      isPro: false,
       authProvider: 'google' as const,
-    },
-    {
-      name: 'Marcus Sterling',
-      email: 'marcus@hedgefund-quant.io',
-      role: 'Quantitative Derivatives Trader',
-      isPro: true,
-      authProvider: 'email' as const,
     },
   ];
 

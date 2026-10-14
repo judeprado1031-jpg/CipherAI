@@ -4,6 +4,7 @@ import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { generateGraphData } from './src/utils/graphGenerator';
 
 dotenv.config();
 
@@ -319,16 +320,9 @@ FABM 2 SPECIALIZATIONS:
 - Linear Algebra & Matrices: Matrix addition, multiplication, determinants, inverses, solving systems using Cramer's rule or Gaussian elimination.`;
     } else if (assistantMode === 'graphs') {
       personaGuidance = `You are Cipher operating in Graphs & Plotting mode. You specialize in coordinate plane visualization, function geometry, and mathematical graphing:
-- Cartesian Coordinate Graphing: Plotting linear equations ($y = mx + b$), calculating slope ($m$), x-intercepts, y-intercepts
-- Quadratic Functions & Parabolas: Finding the vertex $(h, k)$, axis of symmetry $x = -b/(2a)$, roots / zeros, direction of opening (concave up/down), focus and directrix
-- Polynomial, Rational, and Trigonometric Function curves (amplitude, period, phase shift, vertical shift, vertical & horizontal asymptotes)
-- Systems of equations: Finding the exact intersection point $(x, y)$ of intersecting curves
-- Economic & Business graphs: Supply and Demand curve intersection (Equilibrium price and quantity), Break-even point charts (Fixed cost, Total cost, Total revenue lines)
-- ALWAYS provide:
-  1. The exact mathematical equation
-  2. A clean Coordinate Table of $(x, y)$ points across a representative interval
-  3. Key geometric points (Vertex, Intercepts, Asymptotes, Intersection points)
-  4. A clear visual ASCII/Markdown coordinate chart representation of the graph!`;
+- Analyze the equation: state the exact function equation and key points: Vertex $(h, k)$, axis of symmetry, $x$-intercepts (roots), $y$-intercept, and slope.
+- DO NOT generate ASCII or text-based coordinate charts because a visual coordinate graph image is already generated and displayed by the interface.
+- DO NOT add unsolicited essays, commentary, or extraneous information. Provide only the essential mathematical characteristics.`;
     } else {
       personaGuidance = `You are Cipher operating in Socratic Math Tutor mode. You specialize in pedagogical, patient, and encouraging math instruction:
 - Break down homework problems into small, digestible, intuitive steps
@@ -342,63 +336,49 @@ FABM 2 SPECIALIZATIONS:
     let outputStyleInstruction = '';
     if (teachingMode === 'direct') {
       outputStyleInstruction = `
-CRITICAL DIRECT ANSWER MODE ENFORCEMENT:
-THE USER HAS CHOSEN "DIRECT ANSWER" MODE.
-You must output ONLY THE DIRECT FINAL ANSWER. NOTHING MORE, NOTHING LESS.
-- DO NOT include greetings, introductions, conversational filler, or commentary.
-- DO NOT provide explanations, step-by-step working, or tutorial breakdowns.
-- DO NOT provide summary recommendations or tips.
-- Output ONLY the direct solution / answer value (e.g., "**Answer:** ${currency}1,102.50" or the exact journal entry / coordinates).
-Strictly answer only. Nothing more, nothing less.
+CRITICAL DIRECT ANSWER MODE:
+- For mathematical or accounting calculations: Output directly the exact final answer value or journal entry.
+- For multiple-choice questions or activity worksheets: For each question visible, state the Question number and the exact correct choice (e.g. "**Question 1: C - ₱450.00**").
+- For conversational greetings or general questions from the user (such as "hi", "how are you", "who are you", "what can you do"): Answer directly and conversationally as Cipher AI.
 `;
     } else {
       outputStyleInstruction = `
-CRITICAL TEACH ME MODE ENFORCEMENT:
-THE USER HAS CHOSEN "TEACH ME" MODE (How It Is Done with Hidden Answer):
-Your mission is to show HOW IT IS DONE step-by-step so the student understands the underlying concepts and methodology.
-IMPORTANT: Do NOT give away the final answer in the instructional steps! Guide the student through the concepts and mechanics.
-Then, place the definitive final answer at the very bottom strictly inside the special tags [REVEAL_ANSWER] and [/REVEAL_ANSWER], like this:
+CRITICAL TEACH ME MODE:
+- For math and accounting problems: Teach the necessary method and working steps clearly.
+- At the very end of your response, provide the final answer strictly enclosed in [REVEAL_ANSWER] and [/REVEAL_ANSWER].
+- For multiple-choice activities: For each question, explain the brief reasoning/calculation for why that specific choice is correct, then provide the final answer inside [REVEAL_ANSWER].
+- For conversational questions: Answer directly, helpfully, and conversationally.
+Format:
 [REVEAL_ANSWER]
-**Final Answer:** <exact numerical or formal solution with ${currency}>
-[/REVEAL_ANSWER]
-
-Structure your instructional response:
-1. **Core Concept & Intuition**: Explain what principle or concept governs this problem.
-2. **Governing Formula**: Provide the mathematical or accounting formula in LaTeX ($$...$$).
-3. **How It Is Done (Step-by-Step Breakdown)**:
-   - Walk through the exact methodology and mechanics of how each step is computed.
-   - Show how the numbers substitute into the formula.
-4. Conclude strictly with:
-[REVEAL_ANSWER]
-**Final Answer:** <exact answer here>
+**Final Answer:** <exact numerical or formal solution value with ${currency}>
 [/REVEAL_ANSWER]
 `;
     }
 
     const systemInstruction = `
-You are Cipher, an elite personal AI assistant specializing in mathematics problems, especially business math, commercial arithmetic, corporate finance, and advanced financial calculations.
+You are Cipher AI, an intelligent personal assistant specializing in mathematics, accounting (FABM 1 & 2), commercial arithmetic, financial problem-solving, and coordinate graphs.
 ${personaGuidance}
 ${outputStyleInstruction}
 
-CRITICAL MATHEMATICAL & ACCOUNTING FORMATTING RULES:
-- Always format mathematical formulas using LaTeX syntax:
-  - Block formulas: $$ \\text{NPV} = \\sum_{t=1}^{n} \\frac{CF_t}{(1 + r)^t} - C_0 $$
-  - Inline math: $r = 7.5\\%$ or $PV = \\frac{FV}{(1+i)^n}$
-- Use currency prefix "${currency}" (or ₱ if specified) where monetary amounts are calculated.
-- Maintain utmost arithmetic precision. Double check all calculations (powers, logarithms, fractions, percentages) before printing.
-- If the problem involves an amortization schedule, DCF schedule, or scenario comparison, provide a crisp Markdown table.
-- FOR ACCOUNTING & FABM 1 / FABM 2 PROBLEMS:
-  - For Journal Entries: Present a formal General Journal table with columns: Date | Account Titles and Explanation | PR | Debit (${currency}) | Credit (${currency}). Always indent the credited account by 4 spaces (&nbsp;&nbsp;&nbsp;&nbsp;) and include the transaction explanation in parentheses.
-  - Explain the Debit/Credit rule applied (e.g., Increase in Asset = Debit, Increase in Liability/Equity = Credit).
-  - Verify that Total Debits strictly equal Total Credits ($$\\sum \\text{Debits} = \\sum \\text{Credits}$$).
-  - For Bank Reconciliation: Provide the Adjusted Balance Method showing both Book side and Bank side reconciling items yielding the same Adjusted Balance.
-  - For Merchandising: Clearly calculate Net Purchases, Freight-In, Cost of Goods Available for Sale (COGAS), Ending Inventory, Cost of Goods Sold (COGS), and Gross Profit.
+CRITICAL RULES — ANSWER WHAT THE USER ASKS (NO REPEATING, NO RANDOM ANSWERS):
+1. ALWAYS ANSWER WHAT THE USER ACTUALLY ASKS:
+   - If the user sends a conversation, greeting ("hello", "hi", "how are you"), or asks questions about your capabilities, converse naturally, politely, and concisely. Never output random numbers, canned accounting entries, or repeat unrelated answers.
+   - If the user asks a specific question, answer THAT specific question. Never repeat a previous answer over and over again.
 
-STUDENT HOMEWORK & IMAGE ANALYSIS:
-If a student provides a picture or paste of their homework:
-1. First, clearly state the problem identified from the image: "**Identified Homework Problem:** ..."
-2. If handwriting or student calculations are present, review their work, celebrate correct steps, and point out any errors gently.
-3. Solve the problem completely according to the requested mode ("Teach Me" or "Direct Answer").
+2. MULTIPLE-CHOICE ACTIVITIES & SCREENSHOT ANALYSIS (CRITICAL):
+   When the user provides a picture or screenshot of an activity, worksheet, exam, or quiz (especially multiple choice):
+   - Carefully read and transcribe every question and its options (A, B, C, D) visible in the image.
+   - Address EACH question specifically by its number (e.g., **Question 1**, **Question 2**, etc.).
+   - State the correct option clearly (e.g., **Question 1: C (₱12,500.00)** or **Question 2: B (Debit Cash)**).
+   - NEVER invent or make up random questions or random numbers that are not in the user's image. Answer strictly the questions shown in the image!
+   - If in Direct Answer mode: Give the question number and correct answer letter/value for each question.
+   - If in Teach Me mode: Briefly show the step or rule proving why that option is correct, then reveal the answer.
+
+3. SPEED, ACCURACY & CONCISENESS:
+   - Answer directly and accurately without unsolicited background essays or filler.
+   - When graphing: The system generates an actual visual graph image. State the exact equation and key points (Vertex, Intercepts, Slope). DO NOT generate ASCII or text art diagrams!
+   - Always format mathematical formulas using LaTeX syntax ($$...$$ for block, $...$ for inline).
+   - Use currency prefix "${currency}" (or ₱ if specified) where monetary amounts are calculated.
 `;
 
     let generatedText = '';
@@ -421,28 +401,54 @@ If a student provides a picture or paste of their homework:
       // Add current user prompt (multimodal with image if provided)
       const userParts: any[] = [];
 
-      if (image) {
-        let base64Data = image;
-        let resolvedMime = mimeType || 'image/jpeg';
-        if (typeof image === 'string' && image.startsWith('data:')) {
-          const match = image.match(/^data:([^;]+);base64,(.+)$/);
-          if (match) {
-            resolvedMime = match[1];
-            base64Data = match[2];
+      // Only add inlineData if it is a supported raster image (JPEG, PNG, WEBP, HEIC) with valid base64
+      if (image && typeof image === 'string') {
+        const isSvg =
+          (mimeType && mimeType.includes('svg')) ||
+          image.startsWith('data:image/svg') ||
+          image.includes('<svg');
+
+        if (!isSvg) {
+          let base64Data = '';
+          let resolvedMime = mimeType && mimeType.startsWith('image/') ? mimeType : 'image/jpeg';
+
+          if (image.startsWith('data:')) {
+            const commaIndex = image.indexOf(',');
+            if (commaIndex !== -1) {
+              const header = image.slice(0, commaIndex);
+              const content = image.slice(commaIndex + 1);
+              const mimeMatch = header.match(/data:([^;,]+)/);
+              if (mimeMatch) {
+                resolvedMime = mimeMatch[1];
+              }
+              base64Data = content.trim();
+            }
+          } else {
+            base64Data = image.trim();
+          }
+
+          // Gemini vision models strictly support: image/png, image/jpeg, image/webp, image/heic, image/heif
+          const supportedMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
+          if (!supportedMimes.includes(resolvedMime)) {
+            resolvedMime = 'image/jpeg';
+          }
+
+          // Only attach inlineData if valid base64 payload is present
+          if (base64Data && base64Data.length > 50 && !base64Data.includes('<')) {
+            userParts.push({
+              inlineData: {
+                data: base64Data,
+                mimeType: resolvedMime,
+              },
+            });
           }
         }
-        userParts.push({
-          inlineData: {
-            data: base64Data,
-            mimeType: resolvedMime,
-          },
-        });
       }
 
       userParts.push({
         text:
           message ||
-          'Please read and analyze this homework math problem from the image. Solve it step-by-step and explain the methodology.',
+          'Please read and analyze this homework worksheet or activity from the image. Solve each question and provide the accurate answers.',
       });
 
       formattedContents.push({
@@ -450,42 +456,103 @@ If a student provides a picture or paste of their homework:
         parts: userParts,
       });
 
-      // Try gemini-3.8-flash first, then fallback to gemini-flash-latest or math generator if upstream experiences temporary spikes
-      try {
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: formattedContents,
-          config: {
-            systemInstruction,
-            temperature: 0.2, // Low temperature for high mathematical accuracy
-          },
-        });
-        generatedText = response.text || '';
-      } catch (geminiErr: any) {
-        console.warn('Gemini 3.8 flash busy or error, attempting fallback model...', geminiErr?.message);
+      // Model cascade: gemini-3.1-flash-lite (fastest, active vision), gemini-3.8-flash, gemini-flash-latest, gemini-3.1-pro-preview
+      const candidateModels = [
+        'gemini-3.1-flash-lite',
+        'gemini-3.8-flash',
+        'gemini-flash-latest',
+        'gemini-3.1-pro-preview',
+      ];
+
+      let modelSucceeded = false;
+
+      // 1. Try multimodal / full contents across candidate models
+      for (const modelName of candidateModels) {
         try {
-          const fallbackResp = await ai.models.generateContent({
-            model: 'gemini-flash-latest',
+          const response = await ai.models.generateContent({
+            model: modelName,
             contents: formattedContents,
             config: {
               systemInstruction,
-              temperature: 0.2,
+              temperature: 0.15,
+              maxOutputTokens: teachingMode === 'direct' ? 1200 : 3000,
             },
           });
-          generatedText = fallbackResp.text || '';
-        } catch (secondaryErr: any) {
-          console.warn('Secondary model unavailable, activating analytical math solver...', secondaryErr?.message);
-          generatedText = generateDevFallbackResponse(message, teachingMode, assistantMode, currency);
+          if (response && response.text) {
+            generatedText = response.text;
+            modelSucceeded = true;
+            break;
+          }
+        } catch (err: any) {
+          console.warn(`Model ${modelName} failed:`, err?.message || err);
         }
+      }
+
+      // 2. If multimodal failed, retry text-only across candidate models
+      if (!modelSucceeded && userParts.some((p: any) => p && p.inlineData)) {
+        console.warn('Multimodal attempts failed, retrying text-only across candidate models...');
+        const textOnlyContents = formattedContents.map((c) => ({
+          role: c.role,
+          parts: c.parts.filter((p: any) => p && p.text).map((p: any) => ({ text: p.text })),
+        }));
+
+        for (const modelName of candidateModels) {
+          try {
+            const fallbackResp = await ai.models.generateContent({
+              model: modelName,
+              contents: textOnlyContents,
+              config: {
+                systemInstruction,
+                temperature: 0.15,
+                maxOutputTokens: teachingMode === 'direct' ? 1200 : 3000,
+              },
+            });
+            if (fallbackResp && fallbackResp.text) {
+              generatedText = fallbackResp.text;
+              modelSucceeded = true;
+              break;
+            }
+          } catch (err: any) {
+            console.warn(`Text-only model ${modelName} failed:`, err?.message || err);
+          }
+        }
+      }
+
+      if (!modelSucceeded) {
+        console.warn('All Gemini models failed, activating intelligent local solver...');
+        generatedText = generateDevFallbackResponse(message, teachingMode, assistantMode, currency, !!image);
       }
     } else {
       // High-fidelity fallback for offline/development if GEMINI_API_KEY is not configured
-      generatedText = generateDevFallbackResponse(message, teachingMode, assistantMode, currency);
+      generatedText = generateDevFallbackResponse(message, teachingMode, assistantMode, currency, !!image);
     }
 
     // Record query usage on successful generation
     user.queries.push({ timestamp: Date.now() });
     const updatedUsage = getUserUsage(user);
+
+    let graphImageUrl: string | undefined = undefined;
+    const lowerMsg = (message || '').toLowerCase();
+    const isGraphQuery =
+      assistantMode === 'graphs' ||
+      lowerMsg.includes('graph') ||
+      lowerMsg.includes('plot') ||
+      lowerMsg.includes('parabola') ||
+      lowerMsg.includes('curve') ||
+      (image && typeof image === 'string' && image.startsWith('data:image/svg'));
+
+    if (isGraphQuery) {
+      if (image && typeof image === 'string' && image.startsWith('data:image/svg')) {
+        graphImageUrl = image;
+      } else {
+        try {
+          const gData = generateGraphData(message);
+          graphImageUrl = gData.svgDataUrl;
+        } catch (e) {
+          console.warn('Could not generate server graph:', e);
+        }
+      }
+    }
 
     res.json({
       text: generatedText,
@@ -493,6 +560,7 @@ If a student provides a picture or paste of their homework:
       assistantMode,
       usage: updatedUsage,
       timestamp: Date.now(),
+      graphImageUrl: graphImageUrl || undefined,
     });
   } catch (err: any) {
     console.error('Chat error:', err);
@@ -503,16 +571,84 @@ If a student provides a picture or paste of their homework:
   }
 });
 
-// Fallback math solver for development environment without API key
+// Fallback solver for offline/edge cases
 function generateDevFallbackResponse(
   message: string,
   mode: string,
   assistantMode: string,
-  currency: string
+  currency: string,
+  hasImage: boolean = false
 ): string {
-  const lower = message.toLowerCase();
+  const lower = (message || '').toLowerCase().trim();
 
-  // 1. Bank Reconciliation
+  // 1. Conversational greetings and inquiries
+  if (
+    lower === 'hi' ||
+    lower === 'hello' ||
+    lower === 'hey' ||
+    lower.startsWith('hi ') ||
+    lower.startsWith('hello ') ||
+    lower.startsWith('hey ') ||
+    lower.includes('who are you') ||
+    lower.includes('how are you') ||
+    lower.includes('what can you do') ||
+    lower.includes('what are you') ||
+    lower.includes('help me')
+  ) {
+    return `Hello! I am **Cipher AI**, your personal assistant for mathematics, business math, FABM accounting, and coordinate graphing.
+
+How I can help you:
+- **Solve Activities & Homework**: Send a problem or screenshot of your worksheets (including multiple-choice questions) and I will solve each question accurately.
+- **Modes**: Choose **Direct Answer** for instant answers, or **Teach Me** for step-by-step guidance with hidden answers.
+- **Plotting & Graphs**: Click the **Graph** button to plot equations on a coordinate plane.
+
+What math or accounting problem would you like to solve?`;
+  }
+
+  // 2. Activity / Screenshot upload when offline
+  if (hasImage || lower.includes('screenshot') || lower.includes('worksheet') || lower.includes('activity')) {
+    return `I received your activity screenshot! 
+
+To solve your multiple-choice questions or worksheet immediately:
+1. Type or paste the question number and text (along with choices A, B, C, D) in the chat.
+2. I will calculate the exact answer, identify the correct letter option, and explain the steps!`;
+  }
+
+  // 3. Simple arithmetic evaluator (e.g., "2 + 2", "50 * 12", "100 / 4", "15% of 200")
+  const pctOfMatch = lower.match(/^([0-9\.]+)\s*%\s*(?:of)\s*([0-9\.]+)$/);
+  if (pctOfMatch) {
+    const rate = parseFloat(pctOfMatch[1]) / 100;
+    const base = parseFloat(pctOfMatch[2]);
+    const res = rate * base;
+    if (mode === 'direct') return `**Answer:** ${res}`;
+    return `### Calculation: ${pctOfMatch[1]}% of ${pctOfMatch[2]}
+- Formula: $\\text{Result} = \\text{Base} \\times \\text{Rate} = ${base} \\times ${rate} = ${res}$
+[REVEAL_ANSWER]
+**Final Answer:** **${res}**
+[/REVEAL_ANSWER]`;
+  }
+
+  const cleanExpr = lower.replace(/\s+/g, '').replace(/x/g, '*');
+  if (/^[0-9\+\-\*\/\(\)\.]+$/.test(cleanExpr)) {
+    try {
+      // eslint-disable-next-line no-eval
+      const result = Function(`'use strict'; return (${cleanExpr})`)();
+      if (typeof result === 'number' && !isNaN(result)) {
+        if (mode === 'direct') {
+          return `**Answer:** ${result.toLocaleString()}`;
+        }
+        return `### Calculation: ${message.trim()}
+
+- **Expression:** $${cleanExpr} = ${result}$
+
+[REVEAL_ANSWER]
+**Final Answer:** **${result.toLocaleString()}**
+[/REVEAL_ANSWER]`;
+      }
+    } catch {}
+  }
+
+  // 4. Specific accounting/finance topics ONLY if query explicitly asks for them
   if (lower.includes('bank rec') || lower.includes('reconciliation')) {
     if (mode === 'direct') {
       return `**Adjusted Cash Balance:** ${currency}93,150.00`;
@@ -520,175 +656,65 @@ function generateDevFallbackResponse(
     return `### Bank Reconciliation (Adjusted Balance Method)
 
 #### 1. Core Concept
-A bank reconciliation aligns the general ledger Cash balance (Book balance) with the Bank statement balance by accounting for timing differences (deposits in transit, outstanding checks) and unrecorded items (bank collections, NSF checks, service fees). Both sides must arrive at the exact same adjusted cash balance.
+A bank reconciliation aligns the general ledger Cash balance (Book balance) with the Bank statement balance by accounting for timing differences (deposits in transit, outstanding checks) and unrecorded items.
 
-#### 2. Governing Method
-$$\\text{Adjusted Book Balance} = \\text{Book Balance} + \\text{Credit Memos} - \\text{Debit Memos} \\pm \\text{Book Errors}$$
-$$\\text{Adjusted Bank Balance} = \\text{Bank Balance} + \\text{Deposits in Transit} - \\text{Outstanding Checks} \\pm \\text{Bank Errors}$$
-
-#### 3. How It Is Done (Step-by-Step)
-- **Book Side Calculations:**
-  - Starting Unadjusted Book: ${currency}84,500.00
-  - Add Notes Collected (+${currency}12,000.00) & Interest (+${currency}180.00)
-  - Less NSF Check (-${currency}3,400.00), Service Charge (-${currency}50.00), Book Error (-${currency}270.00)
-  - Result: ${currency}84,500 + ${currency}12,180 - ${currency}3,530 = ${currency}93,150.00
-- **Bank Side Calculations:**
-  - Starting Bank: ${currency}92,300.00
-  - Add Deposits in Transit (+${currency}8,400.00)
-  - Less Outstanding Checks (-${currency}7,550.00)
-  - Result: ${currency}92,300 + ${currency}8,400 - ${currency}7,550 = ${currency}93,150.00
+#### 2. Summary
+- Adjusted Book Balance: ${currency}93,150.00
+- Adjusted Bank Balance: ${currency}93,150.00
 
 [REVEAL_ANSWER]
 **Final Answer:** Adjusted Cash Balance is **${currency}93,150.00** on both Book and Bank statements.
 [/REVEAL_ANSWER]`;
   }
 
-  // 2. Net Present Value (NPV)
   if (lower.includes('npv') || lower.includes('net present value')) {
     if (mode === 'direct') {
       return `**Net Present Value (NPV):** ${currency}58,416.72 (Decision: Accept Project)`;
     }
     return `### How to Calculate Net Present Value (NPV)
-
-#### 1. Core Concept
-Net Present Value (NPV) evaluates capital investments by discounting all future net cash flows back to the present day using the firm's required cost of capital ($r$), and then subtracting the initial outlay ($C_0$).
-
-#### 2. Governing Formula
-$$ \\text{NPV} = \\sum_{t=1}^{n} \\frac{CF_t}{(1 + r)^t} - C_0 $$
-
-#### 3. How It Is Done (Step-by-Step)
-- **Identify Given Variables:**
-  - Initial Outlay ($C_0$): ${currency}250,000.00
-  - Periodic Annual Inflow ($CF$): ${currency}75,000.00 for $n = 5$ years
-  - Hurdle Rate ($r$): $10\\% = 0.10$
-- **Step 1: Compute Present Value of Inflows using Annuity Factor:**
-  $$ PVIFA_{10\\%, 5} = \\frac{1 - (1.10)^{-5}}{0.10} = \\frac{1 - 0.620921}{0.10} = 3.790787 $$
-  $$ PV(\\text{Inflows}) = ${currency}75,000 \\times 3.790787 = ${currency}308,416.72 $$
-- **Step 2: Deduct Initial Investment:**
-  $$ \\text{NPV} = ${currency}308,416.72 - ${currency}250,000.00 $$
-
+Formula: $$ \\text{NPV} = \\sum_{t=1}^{n} \\frac{CF_t}{(1 + r)^t} - C_0 $$
 [REVEAL_ANSWER]
-**Final Answer:** Net Present Value is **${currency}58,416.72**. Since $\\text{NPV} > 0$, the managerial decision is to **ACCEPT PROJECT**.
+**Final Answer:** Net Present Value is **${currency}58,416.72**. Decision: **ACCEPT PROJECT**.
 [/REVEAL_ANSWER]`;
   }
 
-  // 3. Markup vs Gross Margin
-  if (lower.includes('markup') || lower.includes('margin') || assistantMode === 'business_math') {
+  if (lower.includes('markup') || lower.includes('gross margin')) {
     if (mode === 'direct') {
       return `**Selling Price:** ${currency}692.31 | **Markup on Cost:** 53.85%`;
     }
-    return `### How to Calculate Markup vs Gross Margin
-
-#### 1. Core Economic Concept
-- **Gross Margin**: The percentage of the final selling price that is gross profit.
-- **Markup on Cost**: The percentage added onto wholesale cost to reach selling price.
-
-#### 2. Governing Formulas
-$$ \\text{Selling Price} = \\frac{\\text{Cost}}{1 - \\text{Margin Rate}} $$
-$$ \\text{Markup on Cost} = \\frac{\\text{Selling Price} - \\text{Cost}}{\\text{Cost}} \\times 100\\% $$
-
-#### 3. How It Is Done (Step-by-Step)
-- **Given Parameters:** Cost = ${currency}450.00, Desired Gross Margin = $35\\%$ ($0.35$).
-- **Step 1: Calculate Selling Price:**
-  $$ \\text{Selling Price} = \\frac{${currency}450.00}{1 - 0.35} = \\frac{${currency}450.00}{0.65} $$
-- **Step 2: Calculate Dollar Profit:**
-  $$ \\text{Gross Profit} = \\text{Selling Price} - \\text{Cost} = ${currency}692.31 - ${currency}450.00 = ${currency}242.31 $$
-- **Step 3: Calculate Percentage Markup on Cost:**
-  $$ \\text{Markup} \\% = \\frac{${currency}242.31}{${currency}450.00} \\times 100\\% $$
-
+    return `### Markup vs Gross Margin
+- Selling Price: $\\frac{\\text{Cost}}{1 - \\text{Margin}}$
 [REVEAL_ANSWER]
-**Final Answer:** **Selling Price: ${currency}692.31** and **Markup on Cost: 53.85%**.
+**Final Answer:** **Selling Price: ${currency}692.31** | **Markup on Cost: 53.85%**.
 [/REVEAL_ANSWER]`;
   }
 
-  // 4. Graphs & Plotting
-  if (lower.includes('graph') || lower.includes('plot') || lower.includes('parabola') || assistantMode === 'graphs') {
-    if (mode === 'direct') {
-      return `**Vertex:** (2, -1) | **Roots (X-Intercepts):** x = 1, x = 3 | **Y-Intercept:** (0, 3)`;
-    }
-    return `### How to Analyze and Graph the Parabola $f(x) = x^2 - 4x + 3$
-
-#### 1. Core Function Characteristics
-The equation is quadratic in standard form $y = ax^2 + bx + c$, where $a = 1$, $b = -4$, and $c = 3$. Because $a > 0$, the parabola opens upward and has a minimum vertex.
-
-#### 2. Governing Formulas
-- Axis of Symmetry: $x = -\\frac{b}{2a}$
-- Vertex Coordinates: $(h, k)$ where $h = -\\frac{b}{2a}$ and $k = f(h)$
-- Roots: $x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$
-
-#### 3. How It Is Done (Step-by-Step)
-- **Step 1: Find Axis of Symmetry and Vertex:**
-  $$ h = -\\frac{-4}{2(1)} = 2 $$
-  $$ k = f(2) = (2)^2 - 4(2) + 3 = 4 - 8 + 3 = -1 \\implies \\text{Vertex: } (2, -1) $$
-- **Step 2: Find X-Intercepts (Factoring):**
-  $$ x^2 - 4x + 3 = 0 \\implies (x - 1)(x - 3) = 0 \\implies x_1 = 1, x_2 = 3 $$
-- **Step 3: Find Y-Intercept:**
-  $$ f(0) = 0 - 0 + 3 = 3 \\implies (0, 3) $$
-
-[REVEAL_ANSWER]
-**Final Answer:** Vertex is **(2, -1)**, X-Intercepts are **(1, 0)** and **(3, 0)**, Y-Intercept is **(0, 3)**, Axis of symmetry is line **$x = 2$**.
-[/REVEAL_ANSWER]`;
-  }
-
-  // 5. FABM & Journal Entries
-  if (lower.includes('journal') || lower.includes('debit') || lower.includes('credit') || lower.includes('fabm') || lower.includes('accounting') || assistantMode === 'fabm') {
+  if (lower.includes('journal') || (lower.includes('debit') && lower.includes('credit'))) {
     if (mode === 'direct') {
       return `| Date | Account Titles & Explanation | PR | Debit (${currency}) | Credit (${currency}) |
 | :--- | :--- | :---: | :---: | :---: |
 | Nov 10 | Merchandise Inventory | 120 | ${currency}25,000.00 | |
-| | &nbsp;&nbsp;&nbsp;&nbsp;Accounts Payable | 201 | | ${currency}25,000.00 |
-| | *(Purchased inventory on account, 2/10, n/30)* | | | |`;
+| | &nbsp;&nbsp;&nbsp;&nbsp;Accounts Payable | 201 | | ${currency}25,000.00 |`;
     }
-    return `### How to Journalize Perpetual Inventory Merchandising Transactions
-
-#### 1. Core Double-Entry Concept
-The fundamental accounting equation:
-$$\\mathbf{\\text{Assets} = \\text{Liabilities} + \\text{Owner's Equity}}$$
-Under perpetual inventory, purchases of merchandise directly increase the asset account **Merchandise Inventory** (Debit), while incurring trade credit increases **Accounts Payable** (Credit).
-
-#### 2. Governing Rules of Debit and Credit
-- Increase in Asset = **Debit**
-- Increase in Liability = **Credit**
-- Normal balance of Inventory is Debit; normal balance of Accounts Payable is Credit.
-
-#### 3. How It Is Done (Step-by-Step)
-- **Step 1: Identify Accounts:** Merchandise is acquired for resale (Merchandise Inventory, Asset) on credit terms (Accounts Payable, Liability).
-- **Step 2: Determine Direction:** Assets increase by ${currency}25,000; Liabilities increase by ${currency}25,000.
-- **Step 3: Verify Balance:** Debits (${currency}25,000) equal Credits (${currency}25,000).
-
+    return `### General Journal Entry
+- Normal balance: Assets increase with Debit, Liabilities increase with Credit.
 [REVEAL_ANSWER]
-**Final Answer:**
 | Date | Account Titles & Explanation | PR | Debit (${currency}) | Credit (${currency}) |
 | :--- | :--- | :---: | :---: | :---: |
 | Nov 10 | Merchandise Inventory | 120 | ${currency}25,000.00 | |
 | | &nbsp;&nbsp;&nbsp;&nbsp;Accounts Payable | 201 | | ${currency}25,000.00 |
-| | *(To record purchase of inventory on account, terms 2/10, n/30)* | | | |
 [/REVEAL_ANSWER]`;
   }
 
-  // 6. Generic Math & Tutor Fallback
+  // 5. Generic responsive fallback
   if (mode === 'direct') {
-    return `**Answer:** ${currency}1,250.00`;
+    return `**Answer:** Please provide the full equation, numbers, or question options (A, B, C, D) so I can compute the exact answer for you.`;
   }
-  return `### How to Solve: ${message}
+  return `### How to Solve: ${message || 'Your Problem'}
 
-#### 1. Core Principle
-In applied mathematics, we break the problem into known parameters, governing relationship formulas, and systematic algebra.
-
-#### 2. Governing Formula
-$$ \\text{Result} = \\text{Base} \\times (1 + r)^n $$
-
-#### 3. How It Is Done (Step-by-Step)
-- **Step 1: Extract Given Quantities:**
-  Identify your base parameter, applicable rate, and time cycles.
-- **Step 2: Substitute Knowns into the Formula:**
-  Compute intermediate terms following order of operations (PEMDAS).
-- **Step 3: Verification:**
-  Check units and numerical reasonableness.
-
-[REVEAL_ANSWER]
-**Final Answer:** Calculated result is **${currency}1,250.00**.
-[/REVEAL_ANSWER]`;
+To give you the exact steps and correct answer:
+1. Please provide the numbers, formula, or multiple-choice questions you are working on.
+2. If this is an activity from a worksheet, you can type the question number and choices (A, B, C, D) and I'll solve it step-by-step!`;
 }
 
 // Interactive Quiz / Practice generator endpoint
@@ -789,23 +815,35 @@ Ensure exactly 4 options are provided per question and correctIndex is an intege
 
       try {
         const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('AI_TIMEOUT')), 8000)
+          setTimeout(() => reject(new Error('AI_TIMEOUT')), 12000)
         );
 
-        const response: any = await Promise.race([
-          ai.models.generateContent({
-            model: 'gemini-3.8-flash',
-            contents: [{ role: 'user', parts: userParts }],
-            config: {
-              responseMimeType: 'application/json',
-              temperature: 0.2,
-            },
-          }),
-          timeoutPromise,
-        ]);
+        const quizModels = ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
+        let rawText = '';
 
-        const rawText = response?.text || '{}';
-        const parsed = JSON.parse(rawText);
+        for (const qModel of quizModels) {
+          try {
+            const response: any = await Promise.race([
+              ai.models.generateContent({
+                model: qModel,
+                contents: [{ role: 'user', parts: userParts }],
+                config: {
+                  responseMimeType: 'application/json',
+                  temperature: 0.2,
+                },
+              }),
+              timeoutPromise,
+            ]);
+            if (response?.text) {
+              rawText = response.text;
+              break;
+            }
+          } catch (e: any) {
+            console.warn(`Quiz model ${qModel} failed:`, e?.message || e);
+          }
+        }
+
+        const parsed = JSON.parse(rawText || '{}');
         if (parsed.questions && Array.isArray(parsed.questions) && parsed.questions.length > 0) {
           return res.json({
             id: 'quiz_' + Date.now(),

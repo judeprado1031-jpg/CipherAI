@@ -33,7 +33,10 @@ import {
   Eye,
   EyeOff,
   CheckCircle2,
+  LineChart,
+  Download,
 } from 'lucide-react';
+import { GraphModal } from './GraphModal';
 
 interface ChatViewProps {
   session: ChatSession;
@@ -52,6 +55,7 @@ interface ChatViewProps {
   onOpenSubscriptionModal: () => void;
   currency: string;
   onOpenQuiz?: () => void;
+  onOpenGraphModal?: () => void;
 }
 
 const GREETING_QUESTIONS = [
@@ -81,6 +85,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
   onOpenSubscriptionModal,
   currency,
   onOpenQuiz,
+  onOpenGraphModal,
 }) => {
   const { themeConfig } = useTheme();
   const [input, setInput] = useState('');
@@ -98,6 +103,15 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const [attachedFileName, setAttachedFileName] = useState<string | null>(null);
   const [zoomImage, setZoomImage] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isGraphModalOpen, setIsGraphModalOpen] = useState(false);
+
+  const handleOpenGraphModal = () => {
+    if (onOpenGraphModal) {
+      onOpenGraphModal();
+    } else {
+      setIsGraphModalOpen(true);
+    }
+  };
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -461,26 +475,59 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     </div>
                   )}
 
-                  {/* Attached Student Homework Image Preview inside bubble */}
+                  {/* Homework Image OR Generated Graph Image Preview inside bubble */}
                   {message.imageUrl && (
                     <div className="mb-3">
-                      <div className="text-[10px] font-bold uppercase tracking-wider mb-1 opacity-80 flex items-center gap-1">
-                        <Camera className="w-3 h-3" /> Attached Homework Problem
+                      <div className="text-[10px] font-bold uppercase tracking-wider mb-1.5 opacity-90 flex items-center justify-between">
+                        <span className={`flex items-center gap-1.5 ${isUser ? 'opacity-80' : 'text-amber-400'}`}>
+                          {isUser ? <Camera className="w-3.5 h-3.5" /> : <LineChart className="w-3.5 h-3.5 text-amber-400" />}
+                          <span>{isUser ? 'Attached Homework Problem' : 'Generated Coordinate Graph'}</span>
+                        </span>
+                        {!isUser && (
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => {
+                                const link = document.createElement('a');
+                                link.href = message.imageUrl!;
+                                link.download = `cipher_graph_${message.id}.svg`;
+                                document.body.appendChild(link);
+                                link.click();
+                                document.body.removeChild(link);
+                              }}
+                              className="text-[10px] flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/10 hover:bg-white/20 text-slate-200 transition-colors"
+                              title="Download Graph Image"
+                            >
+                              <Download className="w-3 h-3 text-amber-400" />
+                              <span>Download</span>
+                            </button>
+                            <button
+                              onClick={() => setZoomImage(message.imageUrl!)}
+                              className="text-[10px] flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/10 hover:bg-white/20 text-slate-200 transition-colors"
+                              title="Enlarge Graph"
+                            >
+                              <Maximize2 className="w-3 h-3" />
+                              <span>Zoom</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
-                      <div className="relative group max-w-sm rounded-xl overflow-hidden border border-white/20 bg-black/40">
+
+                      <div className={`relative group rounded-2xl overflow-hidden border ${isUser ? 'max-w-sm border-white/20 bg-black/40' : 'border-amber-500/30 bg-slate-950 shadow-lg'}`}>
                         <img
                           src={message.imageUrl}
-                          alt="Homework Problem"
-                          className="w-full max-h-56 object-contain rounded-xl cursor-pointer"
+                          alt={isUser ? 'Homework Problem' : 'Generated Coordinate Graph'}
+                          className={`w-full ${isUser ? 'max-h-56' : 'max-h-80'} object-contain rounded-xl cursor-pointer`}
                           onClick={() => setZoomImage(message.imageUrl!)}
                         />
-                        <button
-                          onClick={() => setZoomImage(message.imageUrl!)}
-                          className="absolute bottom-2 right-2 p-1.5 rounded-lg bg-black/70 text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                          title="Enlarge Image"
-                        >
-                          <Maximize2 className="w-3.5 h-3.5" />
-                        </button>
+                        {isUser && (
+                          <button
+                            onClick={() => setZoomImage(message.imageUrl!)}
+                            className="absolute bottom-2 right-2 p-1.5 rounded-lg bg-black/70 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                            title="Enlarge Image"
+                          >
+                            <Maximize2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </div>
                   )}
@@ -700,7 +747,13 @@ export const ChatView: React.FC<ChatViewProps> = ({
               <div className="flex items-center gap-2 overflow-x-auto min-w-0">
                 <AssistantModeSelector
                   currentMode={assistantMode}
-                  onChange={onAssistantModeChange}
+                  onChange={(mode) => {
+                    onAssistantModeChange(mode);
+                    if (mode === 'graphs') {
+                      handleOpenGraphModal();
+                    }
+                  }}
+                  onOpenGraphModal={handleOpenGraphModal}
                   compact
                 />
               </div>
@@ -728,8 +781,17 @@ export const ChatView: React.FC<ChatViewProps> = ({
                 className="w-full bg-transparent text-sm placeholder-slate-500 focus:outline-none resize-none max-h-32"
               />
 
-              {/* Cleanly aligned Action Buttons: Camera, Photo Upload & Submit */}
+              {/* Cleanly aligned Action Buttons: Graph, Camera, Photo Upload & Submit */}
               <div className="flex items-center gap-1.5 shrink-0 pb-0.5">
+                <button
+                  type="button"
+                  onClick={handleOpenGraphModal}
+                  className="h-9 px-2.5 rounded-xl hover:bg-slate-800/60 text-slate-400 hover:text-amber-400 transition-colors border border-transparent hover:border-slate-700 flex items-center justify-center gap-1.5 shrink-0"
+                  title="Generate a Graph Image (Option)"
+                >
+                  <LineChart className="w-4 h-4 text-amber-400" />
+                  <span className="text-xs font-bold hidden sm:inline text-amber-300">Graph</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => cameraInputRef.current?.click()}
@@ -795,6 +857,17 @@ export const ChatView: React.FC<ChatViewProps> = ({
             />
           </div>
         </div>
+      )}
+
+      {/* Graph Option Modal (local fallback if no parent modal handler) */}
+      {!onOpenGraphModal && (
+        <GraphModal
+          isOpen={isGraphModalOpen}
+          onClose={() => setIsGraphModalOpen(false)}
+          onSendToChat={(prompt, graphImageUrl) => {
+            onSendMessage(prompt, graphImageUrl, 'image/svg+xml');
+          }}
+        />
       )}
     </div>
   );

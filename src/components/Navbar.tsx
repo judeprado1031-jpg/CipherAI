@@ -1,7 +1,6 @@
 import React from 'react';
 import { AssistantMode, UserUsage, UserProfile, ColorTheme } from '../types';
 import { ASSISTANT_MODES } from './AssistantModeSelector';
-import { ThemeSelector } from './ThemeSelector';
 import { CipherLogo } from './CipherLogo';
 import { useTheme } from '../utils/themeConfig';
 import {
@@ -28,6 +27,7 @@ interface NavbarProps {
   isReviewCenterOpen: boolean;
   onToggleMobileMenu: () => void;
   onOpenQuiz?: () => void;
+  onOpenGraphModal?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -45,6 +45,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   isReviewCenterOpen,
   onToggleMobileMenu,
   onOpenQuiz,
+  onOpenGraphModal,
 }) => {
   const { themeConfig } = useTheme();
   const currentModeObj = ASSISTANT_MODES.find((m) => m.id === assistantMode);
@@ -80,7 +81,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span
               className={`text-[9px] font-bold tracking-wider uppercase leading-none mt-1 ${themeConfig.classes.accentText}`}
             >
-              Math & Accounting AI
+              Decode the numbers
             </span>
           </div>
         </div>
@@ -110,7 +111,12 @@ export const Navbar: React.FC<NavbarProps> = ({
               return (
                 <button
                   key={m.id}
-                  onClick={() => onAssistantModeChange(m.id)}
+                  onClick={() => {
+                    onAssistantModeChange(m.id);
+                    if (m.id === 'graphs' && onOpenGraphModal) {
+                      onOpenGraphModal();
+                    }
+                  }}
                   className={`w-full text-left p-2 rounded-xl text-xs flex items-center gap-2.5 transition-colors ${
                     isSelected
                       ? `${themeConfig.classes.accentBadge} font-bold border`
@@ -143,15 +149,8 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
         )}
 
-        {/* Color Theme Selector Dropdown */}
-        <ThemeSelector
-          currentTheme={currentTheme}
-          onThemeChange={onThemeChange}
-          compact
-        />
-
         {/* Guest Mode Warning / Sign in with Gmail CTA button */}
-        {profile.isGuest ? (
+        {profile.isGuest && (
           <button
             onClick={onOpenAuth}
             className="h-9 flex items-center gap-1.5 px-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 transition-all text-xs font-semibold shadow-xs"
@@ -162,19 +161,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-[10px] font-bold text-amber-200">
               Sign In
             </span>
-          </button>
-        ) : (
-          <button
-            onClick={onOpenAccount}
-            className={`hidden xl:flex h-9 items-center gap-1.5 px-2.5 rounded-xl border text-[11px] opacity-75 hover:opacity-100 transition-colors shadow-xs ${themeConfig.classes.bgCard} ${themeConfig.classes.border}`}
-            title="Cross-device synchronization active"
-          >
-            <span
-              className={`w-2 h-2 rounded-full ${
-                isSyncing ? 'bg-amber-400 animate-ping' : 'bg-emerald-400'
-              }`}
-            />
-            <span>Synced</span>
           </button>
         )}
 

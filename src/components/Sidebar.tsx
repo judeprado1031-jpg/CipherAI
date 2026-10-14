@@ -125,7 +125,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   Cipher
                 </span>
                 <span className={`text-[10px] font-bold tracking-wider uppercase leading-none mt-1 ${themeConfig.classes.accentText}`}>
-                  Math & Accounting AI
+                  Decode the numbers
                 </span>
               </div>
             </div>
@@ -238,21 +238,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Bottom Quick Tools & 15/15 Usage Limit Card */}
         <div className={`p-3 border-t space-y-2 ${themeConfig.classes.border}`}>
-          {/* Review Center Quick Button */}
-          <button
-            onClick={() => {
-              onOpenReviewCenter();
-              if (isOpenMobile) onCloseMobile();
-            }}
-            className={`w-full py-2 px-3 rounded-xl border flex items-center justify-between text-xs font-semibold transition-all group ${themeConfig.classes.bgCard} ${themeConfig.classes.border} ${themeConfig.classes.bgCardHover}`}
-          >
-            <div className="flex items-center gap-2">
-              <Bookmark className={`w-4 h-4 ${themeConfig.classes.accentText}`} />
-              <span>Review Center & Sandbox</span>
-            </div>
-            <ChevronRight className="w-3.5 h-3.5 opacity-50 group-hover:translate-x-0.5 transition-transform" />
-          </button>
-
           {/* 15 Free Uses Every 24 Hours Indicator Box */}
           <div className={`p-3 rounded-2xl border space-y-2 ${themeConfig.classes.bgCard} ${themeConfig.classes.border}`}>
             <div className="flex items-center justify-between">

@@ -39,6 +39,8 @@ import { AccountModal } from './components/AccountModal';
 import { SubscriptionModal } from './components/SubscriptionModal';
 import { AuthModal } from './components/AuthModal';
 import { QuizModal } from './components/QuizModal';
+import { GraphModal } from './components/GraphModal';
+import { generateGraphData } from './utils/graphGenerator';
 
 export default function App() {
   // Profile & Theme
@@ -71,6 +73,7 @@ export default function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isGraphModalOpen, setIsGraphModalOpen] = useState(false);
 
   // Apply theme to document element
   useEffect(() => {
@@ -329,7 +332,9 @@ export default function App() {
 
     const messagePrompt =
       text.trim() ||
-      (image ? 'Please analyze this homework math problem in the photo step-by-step and solve it.' : '');
+      (image
+        ? 'Please analyze this activity, worksheet, or problem in the image. Read each question, including any multiple-choice choices (A, B, C, D), and provide the accurate answers and solutions for each question shown.'
+        : '');
 
     const userMessage: Message = {
       id: 'msg-' + Date.now(),
@@ -347,7 +352,7 @@ export default function App() {
     const updatedTitle =
       activeSession.messages.length === 0
         ? image
-          ? 'Homework Photo Problem'
+          ? 'Activity / Worksheet Problem'
           : text.slice(0, 32) + (text.length > 32 ? '...' : '')
         : activeSession.title;
 
@@ -399,10 +404,34 @@ export default function App() {
 
       const data = await response.json();
 
+      // Resolve graph image: from backend response, or generate for graphs mode / graphing query, or from graph option image
+      let resolvedGraphImage = data.graphImageUrl;
+      const lowerPrompt = messagePrompt.toLowerCase();
+      const isGraphingQuery =
+        assistantMode === 'graphs' ||
+        lowerPrompt.includes('graph') ||
+        lowerPrompt.includes('plot') ||
+        lowerPrompt.includes('parabola') ||
+        lowerPrompt.includes('curve') ||
+        (image && image.startsWith('data:image/svg'));
+
+      if (!resolvedGraphImage && isGraphingQuery) {
+        if (image && image.startsWith('data:image/svg')) {
+          resolvedGraphImage = image;
+        } else {
+          try {
+            resolvedGraphImage = generateGraphData(messagePrompt).svgDataUrl;
+          } catch (e) {
+            console.warn('Could not auto-generate graph image:', e);
+          }
+        }
+      }
+
       const assistantMessage: Message = {
         id: 'msg-ai-' + Date.now(),
         role: 'assistant',
         content: data.text,
+        imageUrl: resolvedGraphImage || undefined,
         teachingMode: data.teachingMode || teachingMode,
         assistantMode: data.assistantMode || assistantMode,
         timestamp: data.timestamp || Date.now(),
@@ -583,6 +612,7 @@ export default function App() {
             isReviewCenterOpen={isReviewCenterOpen}
             onToggleMobileMenu={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
             onOpenQuiz={() => setIsQuizOpen(true)}
+            onOpenGraphModal={() => setIsGraphModalOpen(true)}
           />
 
           {/* Content View: Review Center OR Active Chat */}
@@ -627,6 +657,7 @@ export default function App() {
                 onOpenSubscriptionModal={() => setIsSubscriptionOpen(true)}
                 currency={profile.currency}
                 onOpenQuiz={() => setIsQuizOpen(true)}
+                onOpenGraphModal={() => setIsGraphModalOpen(true)}
               />
             )}
           </main>
@@ -677,6 +708,16 @@ export default function App() {
           onClose={() => setIsSubscriptionOpen(false)}
           usage={usage}
           onTogglePro={handleTogglePro}
+        />
+
+        {/* Global Graph Option Modal */}
+        <GraphModal
+          isOpen={isGraphModalOpen}
+          onClose={() => setIsGraphModalOpen(false)}
+          onSendToChat={(prompt, graphImageUrl) => {
+            setIsReviewCenterOpen(false);
+            handleSendMessage(prompt, graphImageUrl, 'image/svg+xml');
+          }}
         />
       </div>
     </ThemeContext.Provider>

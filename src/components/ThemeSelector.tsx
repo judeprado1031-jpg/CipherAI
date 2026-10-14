@@ -438,7 +438,7 @@ export const ThemeSelector: React.FC<ThemeSelectorProps> = ({
         />
         <Palette className="w-3.5 h-3.5 opacity-70" />
         <span className="hidden xl:inline text-xs font-semibold truncate max-w-[110px]">
-          {activeThemeObj.name.split(' ')[0]}
+          {currentTheme === 'custom' ? 'Themes' : activeThemeObj.name.split(' ')[0]}
         </span>
       </button>
 
@@ -451,7 +451,7 @@ export const ThemeSelector: React.FC<ThemeSelectorProps> = ({
             color: 'var(--text-main)',
           }}
         >
-          {/* Header & Mode Switcher */}
+          {/* Header */}
           <div
             className="flex items-center justify-between pb-2.5 mb-2.5 border-b"
             style={{ borderColor: 'var(--border-subtle)' }}
@@ -460,104 +460,59 @@ export const ThemeSelector: React.FC<ThemeSelectorProps> = ({
               <Palette className="w-4 h-4 text-pink-400" />
               <span>Color Themes</span>
             </div>
-            <div
-              className="flex items-center gap-1 p-0.5 rounded-xl border"
-              style={{
-                backgroundColor: 'var(--bg-input)',
-                borderColor: 'var(--border-subtle)',
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => setViewTab('presets')}
-                className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all ${
-                  viewTab === 'presets'
-                    ? `${themeConfig.classes.accentBtn} shadow-sm`
-                    : 'opacity-70 hover:opacity-100'
-                }`}
-              >
-                Presets ({PRESET_THEMES.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewTab('custom')}
-                className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all ${
-                  viewTab === 'custom'
-                    ? `${themeConfig.classes.accentBtn} shadow-sm`
-                    : 'opacity-70 hover:opacity-100'
-                }`}
-              >
-                Pick Colors
-              </button>
-            </div>
+            <span className="text-[10px] font-semibold opacity-70">
+              {PRESET_THEMES.length} Presets
+            </span>
           </div>
 
-          {viewTab === 'presets' ? (
-            <div className="space-y-1">
-              <div className="text-[10px] font-bold uppercase tracking-wider px-1 py-0.5 flex items-center justify-between opacity-75">
-                <span>Color Combinations</span>
-                <Sparkles className="w-3 h-3 text-pink-400" />
-              </div>
-              <div className="grid grid-cols-2 gap-1.5 max-h-[50vh] overflow-y-auto pr-1">
-                {PRESET_THEMES.map((theme) => {
-                  const isSelected = currentTheme === theme.id;
-                  return (
-                    <button
-                      key={theme.id}
-                      onClick={() => {
-                        onThemeChange(theme.id);
-                        applyThemeToDocument(theme.id);
-                        setIsOpen(false);
-                      }}
-                      className={`text-left p-2.5 rounded-xl text-xs flex flex-col justify-between transition-all border ${
-                        isSelected ? 'ring-2 ring-sky-500 font-bold' : 'hover:border-slate-400'
-                      }`}
-                      style={{
-                        backgroundColor: theme.tokens.bgCard,
-                        borderColor: isSelected ? theme.primaryColor : 'var(--border-subtle)',
-                        color: theme.tokens.textMain,
-                      }}
-                    >
-                      <div className="flex items-center justify-between w-full mb-1">
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            className="w-3.5 h-3.5 rounded-full border shadow-sm"
-                            style={{
-                              backgroundColor: theme.tokens.bgApp,
-                              borderColor: 'var(--border-subtle)',
-                            }}
-                          />
-                          <span
-                            className="w-2.5 h-2.5 rounded-full"
-                            style={{ backgroundColor: theme.primaryColor }}
-                          />
-                        </div>
-                        {isSelected && <Check className="w-3.5 h-3.5 text-sky-400 shrink-0" />}
-                      </div>
-                      <span className="truncate text-[11px] font-bold">{theme.name}</span>
-                      <span className="text-[9px] opacity-75">{theme.badge}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Shortcut to Custom Studio */}
-              <button
-                type="button"
-                onClick={() => setViewTab('custom')}
-                className="w-full mt-2 py-2 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-2 transition-all shadow-sm"
-                style={{
-                  backgroundColor: 'var(--bg-input)',
-                  borderColor: 'var(--border-subtle)',
-                }}
-              >
-                <Sliders className="w-3.5 h-3.5 text-pink-400" />
-                <span>Pick Custom Background & Accent Colors</span>
-              </button>
+          <div className="space-y-1">
+            <div className="text-[10px] font-bold uppercase tracking-wider px-1 py-0.5 flex items-center justify-between opacity-75">
+              <span>Color Combinations</span>
+              <Sparkles className="w-3 h-3 text-pink-400" />
             </div>
-          ) : (
-            renderCustomStudio()
-          )}
+            <div className="grid grid-cols-2 gap-1.5 max-h-[50vh] overflow-y-auto pr-1">
+              {PRESET_THEMES.map((theme) => {
+                const isSelected = currentTheme === theme.id;
+                return (
+                  <button
+                    key={theme.id}
+                    onClick={() => {
+                      onThemeChange(theme.id);
+                      applyThemeToDocument(theme.id);
+                      setIsOpen(false);
+                    }}
+                    className={`text-left p-2.5 rounded-xl text-xs flex flex-col justify-between transition-all border ${
+                      isSelected ? 'ring-2 ring-sky-500 font-bold' : 'hover:border-slate-400'
+                    }`}
+                    style={{
+                      backgroundColor: theme.tokens.bgCard,
+                      borderColor: isSelected ? theme.primaryColor : 'var(--border-subtle)',
+                      color: theme.tokens.textMain,
+                    }}
+                  >
+                    <div className="flex items-center justify-between w-full mb-1">
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className="w-3.5 h-3.5 rounded-full border shadow-sm"
+                          style={{
+                            backgroundColor: theme.tokens.bgApp,
+                            borderColor: 'var(--border-subtle)',
+                          }}
+                        />
+                        <span
+                          className="w-2.5 h-2.5 rounded-full"
+                          style={{ backgroundColor: theme.primaryColor }}
+                        />
+                      </div>
+                      {isSelected && <Check className="w-3.5 h-3.5 text-sky-400 shrink-0" />}
+                    </div>
+                    <span className="truncate text-[11px] font-bold">{theme.name}</span>
+                    <span className="text-[9px] opacity-75">{theme.badge}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
     </div>

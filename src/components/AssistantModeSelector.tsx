@@ -13,6 +13,7 @@ interface AssistantModeSelectorProps {
   currentMode: AssistantMode;
   onChange: (mode: AssistantMode) => void;
   compact?: boolean;
+  onOpenGraphModal?: () => void;
 }
 
 export const ASSISTANT_MODES: {
@@ -69,6 +70,7 @@ export const AssistantModeSelector: React.FC<AssistantModeSelectorProps> = ({
   currentMode,
   onChange,
   compact = false,
+  onOpenGraphModal,
 }) => {
   const { themeConfig } = useTheme();
 
@@ -81,7 +83,12 @@ export const AssistantModeSelector: React.FC<AssistantModeSelectorProps> = ({
           <button
             key={item.id}
             type="button"
-            onClick={() => onChange(item.id)}
+            onClick={() => {
+              onChange(item.id);
+              if (item.id === 'graphs' && onOpenGraphModal) {
+                onOpenGraphModal();
+              }
+            }}
             className={`flex items-center gap-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
               compact ? 'px-2.5 py-1.5' : 'px-3 py-2'
             } ${
