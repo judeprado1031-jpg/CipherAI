@@ -371,11 +371,64 @@ export default function App() {
 
     setIsLoading(true);
 
+    const assistantMsgId = 'msg-ai-' + Date.now();
+    let accumulatedContent = '';
+
+    // Create an empty assistant placeholder immediately
+    const initialAssistantMsg: Message = {
+      id: assistantMsgId,
+      role: 'assistant',
+      content: '',
+      teachingMode,
+      assistantMode,
+      timestamp: Date.now(),
+    };
+
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === activeSession.id
+          ? {
+              ...s,
+              messages: [...updatedMessages, initialAssistantMsg],
+              updatedAt: Date.now(),
+            }
+          : s
+      )
+    );
+
+    const updateAssistantMsg = (content: string, imageUrl?: string, doneTeachingMode?: 'teach' | 'direct', doneAssistantMode?: string) => {
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === activeSession.id
+            ? {
+                ...s,
+                messages: s.messages.map((m) =>
+                  m.id === assistantMsgId
+                    ? {
+                        ...m,
+                        content,
+                        ...(imageUrl ? { imageUrl } : {}),
+                        ...(doneTeachingMode ? { teachingMode: doneTeachingMode } : {}),
+                        ...(doneAssistantMode ? { assistantMode: doneAssistantMode as any } : {}),
+                      }
+                    : m
+                ),
+                updatedAt: Date.now(),
+              }
+            : s
+        )
+      );
+    };
+
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'text/event-stream, application/json',
+        },
         body: JSON.stringify({
+          stream: true,
           message: messagePrompt,
           image,
           mimeType,
@@ -395,6 +448,17 @@ export default function App() {
         setUsage(errorData.usage);
         setIsSubscriptionOpen(true);
         setIsLoading(false);
+        // Remove empty assistant placeholder
+        setSessions((prev) =>
+          prev.map((s) =>
+            s.id === activeSession.id
+              ? {
+                  ...s,
+                  messages: updatedMessages,
+                }
+              : s
+          )
+        );
         return;
       }
 
@@ -402,10 +466,54 @@ export default function App() {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const data = await response.json();
+      const contentType = response.headers.get('content-type') || '';
 
-      // Resolve graph image: from backend response, or generate for graphs mode / graphing query, or from graph option image
-      let resolvedGraphImage = data.graphImageUrl;
+      if (contentType.includes('text/event-stream') && response.body) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('data:')) continue;
+            try {
+              const payload = JSON.parse(trimmed.slice(5).trim());
+              if (payload.chunk) {
+                accumulatedContent += payload.chunk;
+                updateAssistantMsg(accumulatedContent);
+              }
+              if (payload.done) {
+                if (payload.usage) setUsage(payload.usage);
+                if (payload.graphImageUrl) {
+                  updateAssistantMsg(
+                    accumulatedContent,
+                    payload.graphImageUrl,
+                    payload.teachingMode,
+                    payload.assistantMode
+                  );
+                }
+              }
+            } catch {}
+          }
+        }
+      } else {
+        const data = await response.json();
+        accumulatedContent = data.text || '';
+        updateAssistantMsg(accumulatedContent, data.graphImageUrl, data.teachingMode, data.assistantMode);
+        if (data.usage) {
+          setUsage(data.usage);
+        }
+      }
+
+      // Check client-side graph fallback if graph query and no image attached yet
       const lowerPrompt = messagePrompt.toLowerCase();
       const isGraphingQuery =
         assistantMode === 'graphs' ||
@@ -415,43 +523,15 @@ export default function App() {
         lowerPrompt.includes('curve') ||
         (image && image.startsWith('data:image/svg'));
 
-      if (!resolvedGraphImage && isGraphingQuery) {
-        if (image && image.startsWith('data:image/svg')) {
-          resolvedGraphImage = image;
-        } else {
-          try {
-            resolvedGraphImage = generateGraphData(messagePrompt).svgDataUrl;
-          } catch (e) {
-            console.warn('Could not auto-generate graph image:', e);
-          }
+      if (isGraphingQuery) {
+        try {
+          const svgGraph = (image && image.startsWith('data:image/svg'))
+            ? image
+            : generateGraphData(messagePrompt).svgDataUrl;
+          updateAssistantMsg(accumulatedContent, svgGraph);
+        } catch (e) {
+          console.warn('Could not auto-generate graph image:', e);
         }
-      }
-
-      const assistantMessage: Message = {
-        id: 'msg-ai-' + Date.now(),
-        role: 'assistant',
-        content: data.text,
-        imageUrl: resolvedGraphImage || undefined,
-        teachingMode: data.teachingMode || teachingMode,
-        assistantMode: data.assistantMode || assistantMode,
-        timestamp: data.timestamp || Date.now(),
-      };
-
-      setSessions((prev) =>
-        prev.map((s) =>
-          s.id === activeSession.id
-            ? {
-                ...s,
-                messages: [...updatedMessages, assistantMessage],
-                updatedAt: Date.now(),
-              }
-            : s
-        )
-      );
-
-      // Update remaining usage
-      if (data.usage) {
-        setUsage(data.usage);
       }
     } catch (err: any) {
       console.error('Failed to get answer:', err);

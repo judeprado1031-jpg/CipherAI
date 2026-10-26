@@ -57,11 +57,96 @@ usersDb.set(DEMO_USER_ID, {
   queries: [],
 });
 
-// Helper: Calculate remaining uses in rolling 24 hours (Max 15 free uses per 24 hours)
+// Anti-Abuse & Rate-Limiting Engine: Device Binding, IP Throttling, and Disposable Email Prevention
 const MAX_FREE_USES_PER_24H = 15;
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+const MAX_FREE_ACCOUNTS_PER_DEVICE_24H = 2; // Prevent mass bot account creation
 
-function getUserUsage(user: UserRecord) {
+// Blocklist of disposable / temporary email service domains
+const DISPOSABLE_EMAIL_DOMAINS = new Set([
+  'tempmail.com', '10minutemail.com', 'guerrillamail.com', 'mailinator.com',
+  'trashmail.com', 'yopmail.com', 'sharklasers.com', 'dispostable.com',
+  'temp-mail.org', 'getairmail.com', 'mohmal.com', 'inboxbear.com',
+  'burnermail.io', 'fakeinbox.com', 'generator.email', 'crazymailing.com',
+  'fakemailgenerator.com', 'tempail.com', 'throwawaymail.com', 'maildrop.cc',
+  'mytemp.email', 'dropmail.me', 'harakirimail.com', 'guerrillamailblock.com',
+  'pokemail.net', 'spam4.me', 'nada.ltd', 'nada.email', 'getnada.com',
+  'inboxkitten.com', 'emailfake.com', 'crazymailing.com', 'trashmail.net',
+  'tempmailo.com', 'tmailor.com', 'temp-mail.io', 'minuteinbox.com',
+  'tempmail.net', 'mytempmail.com', 'emailondeck.com', 'fakemail.net',
+  'throwawaymailaddress.com', 'trashmail.io', 'zillamail.com',
+]);
+
+// Normalizes email addresses to defeat plus-tagging and dot-aliasing bypasses
+function canonicalizeEmail(rawEmail: string): { canonicalEmail: string; domain: string; isDisposable: boolean } {
+  const trimmed = (rawEmail || '').trim().toLowerCase();
+  const atIndex = trimmed.lastIndexOf('@');
+  if (atIndex === -1) {
+    return { canonicalEmail: trimmed, domain: '', isDisposable: false };
+  }
+
+  let username = trimmed.slice(0, atIndex);
+  const domain = trimmed.slice(atIndex + 1);
+  const isDisposable = DISPOSABLE_EMAIL_DOMAINS.has(domain);
+
+  // Defeat Gmail alias farming: ignore dots and ignore everything after '+'
+  if (domain === 'gmail.com' || domain === 'googlemail.com') {
+    const plusIdx = username.indexOf('+');
+    if (plusIdx !== -1) {
+      username = username.slice(0, plusIdx);
+    }
+    username = username.replace(/\./g, '');
+    return { canonicalEmail: `${username}@gmail.com`, domain: 'gmail.com', isDisposable };
+  }
+
+  // Defeat Outlook / Hotmail / Yahoo plus-addressing
+  if (domain.includes('outlook.') || domain.includes('hotmail.') || domain.includes('yahoo.')) {
+    const plusIdx = username.indexOf('+');
+    if (plusIdx !== -1) {
+      username = username.slice(0, plusIdx);
+    }
+  }
+
+  return { canonicalEmail: `${username}@${domain}`, domain, isDisposable };
+}
+
+// Device & Network Records for cross-account rate limiting
+interface DeviceRecord {
+  deviceId: string;
+  firstSeenAt: number;
+  lastSeenAt: number;
+  queries: { timestamp: number }[];
+  associatedUserIds: Set<string>;
+  freeAccountsCreated: { email: string; timestamp: number }[];
+  clientIps: Set<string>;
+}
+
+interface IPRecord {
+  ip: string;
+  queries: { timestamp: number }[];
+  devices: Set<string>;
+}
+
+const devicesDb = new Map<string, DeviceRecord>();
+const ipRecordsDb = new Map<string, IPRecord>();
+
+function getClientIp(req: express.Request): string {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string') {
+    const first = forwarded.split(',')[0]?.trim();
+    if (first) return first.replace(/^::ffff:/, '');
+  }
+  const remote = req.socket?.remoteAddress || '127.0.0.1';
+  return remote.replace(/^::ffff:/, '');
+}
+
+/**
+ * Calculates effective usage across user account, physical hardware device, and network IP.
+ * Even if a user logs into 10 different fake accounts or switches to Guest,
+ * their physical device shares the unified 15-prompt daily free quota.
+ */
+function getEffectiveUsage(user: UserRecord, rawDeviceId?: string, clientIp?: string) {
+  // Pro subscribers bypass all device and rate limits
   if (user.isPro) {
     return {
       isPro: true,
@@ -70,58 +155,190 @@ function getUserUsage(user: UserRecord) {
       usedInLast24h: user.queries.length,
       resetInMs: 0,
       nextResetTime: null,
+      deviceBound: false,
+      reason: null as string | null,
     };
   }
 
   const now = Date.now();
-  // Filter queries within the last 24 hours
   user.queries = user.queries.filter((q) => now - q.timestamp < TWENTY_FOUR_HOURS_MS);
 
-  const used = user.queries.length;
-  const remaining = Math.max(0, MAX_FREE_USES_PER_24H - used);
+  const deviceId = (rawDeviceId && rawDeviceId.trim().length >= 6) ? rawDeviceId.trim() : `ip_${clientIp || 'local'}`;
+  let device = devicesDb.get(deviceId);
+  if (!device) {
+    device = {
+      deviceId,
+      firstSeenAt: now,
+      lastSeenAt: now,
+      queries: [],
+      associatedUserIds: new Set([user.id]),
+      freeAccountsCreated: [],
+      clientIps: new Set([clientIp || '127.0.0.1']),
+    };
+    devicesDb.set(deviceId, device);
+  } else {
+    device.lastSeenAt = now;
+    device.associatedUserIds.add(user.id);
+    if (clientIp) device.clientIps.add(clientIp);
+  }
 
-  let resetInMs = 0;
-  if (user.queries.length > 0) {
-    const oldest = user.queries[0].timestamp;
-    resetInMs = Math.max(0, TWENTY_FOUR_HOURS_MS - (now - oldest));
+  device.queries = device.queries.filter((q) => now - q.timestamp < TWENTY_FOUR_HOURS_MS);
+
+  // Check IP record
+  const ip = clientIp || '127.0.0.1';
+  let ipRecord = ipRecordsDb.get(ip);
+  if (!ipRecord) {
+    ipRecord = {
+      ip,
+      queries: [],
+      devices: new Set([deviceId]),
+    };
+    ipRecordsDb.set(ip, ipRecord);
+  } else {
+    ipRecord.devices.add(deviceId);
+  }
+  ipRecord.queries = ipRecord.queries.filter((q) => now - q.timestamp < TWENTY_FOUR_HOURS_MS);
+
+  const userUsed = user.queries.length;
+  const deviceUsed = device.queries.length;
+
+  // The effective consumption is the maximum between account and hardware device
+  const effectiveUsed = Math.max(userUsed, deviceUsed);
+  const remaining = Math.max(0, MAX_FREE_USES_PER_24H - effectiveUsed);
+
+  // Earliest query timestamp dictates the rolling reset countdown
+  let earliest = now;
+  if (device.queries.length > 0) earliest = Math.min(earliest, device.queries[0].timestamp);
+  if (user.queries.length > 0) earliest = Math.min(earliest, user.queries[0].timestamp);
+
+  const resetInMs = effectiveUsed > 0 ? Math.max(0, TWENTY_FOUR_HOURS_MS - (now - earliest)) : 0;
+
+  let reason: string | null = null;
+  if (remaining === 0) {
+    if (deviceUsed >= MAX_FREE_USES_PER_24H && userUsed < MAX_FREE_USES_PER_24H) {
+      reason = 'DEVICE_LIMIT';
+    } else {
+      reason = 'ACCOUNT_LIMIT';
+    }
   }
 
   return {
     isPro: false,
     remainingUses: remaining,
     totalLimit: MAX_FREE_USES_PER_24H,
-    usedInLast24h: used,
+    usedInLast24h: effectiveUsed,
     resetInMs,
     nextResetTime: resetInMs > 0 ? now + resetInMs : null,
+    deviceBound: deviceUsed > userUsed,
+    reason,
   };
 }
 
-// Auth / User Sync endpoint
+function recordQueryUsage(user: UserRecord, rawDeviceId?: string, clientIp?: string) {
+  const now = Date.now();
+  user.queries.push({ timestamp: now });
+
+  const deviceId = (rawDeviceId && rawDeviceId.trim().length >= 6) ? rawDeviceId.trim() : `ip_${clientIp || 'local'}`;
+  let device = devicesDb.get(deviceId);
+  if (device) {
+    device.queries.push({ timestamp: now });
+  }
+
+  const ip = clientIp || '127.0.0.1';
+  let ipRecord = ipRecordsDb.get(ip);
+  if (ipRecord) {
+    ipRecord.queries.push({ timestamp: now });
+  }
+}
+
+// Backward compatible helper
+function getUserUsage(user: UserRecord) {
+  return getEffectiveUsage(user);
+}
+
+// Auth / User Sync endpoint with Disposable Email & Multi-Account Protection
 app.post('/api/auth/login', (req, res) => {
   try {
-    const { email, name, isPro } = req.body;
+    const { email, name, isPro, deviceId } = req.body;
     if (!email) {
       return res.status(400).json({ error: 'Email is required' });
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
-    let user = Array.from(usersDb.values()).find((u) => u.email.toLowerCase() === normalizedEmail);
+    const clientIp = getClientIp(req);
+    const resolvedDeviceId = deviceId || (req.headers['x-device-id'] as string) || `ip_${clientIp}`;
+
+    const { canonicalEmail, domain, isDisposable } = canonicalizeEmail(email);
+
+    // 1. Enforce disposable email block
+    if (isDisposable) {
+      return res.status(400).json({
+        error: 'DISPOSABLE_EMAIL_PROHIBITED',
+        message: 'Temporary or disposable email addresses are not permitted. Please use a valid personal or academic email.',
+      });
+    }
+
+    // 2. Validate email structure
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+    if (!emailRegex.test(canonicalEmail)) {
+      return res.status(400).json({
+        error: 'INVALID_EMAIL_FORMAT',
+        message: 'Please provide a valid email address.',
+      });
+    }
+
+    const now = Date.now();
+    let device = devicesDb.get(resolvedDeviceId);
+    if (!device) {
+      device = {
+        deviceId: resolvedDeviceId,
+        firstSeenAt: now,
+        lastSeenAt: now,
+        queries: [],
+        associatedUserIds: new Set(),
+        freeAccountsCreated: [],
+        clientIps: new Set([clientIp]),
+      };
+      devicesDb.set(resolvedDeviceId, device);
+    }
+
+    // Find user by canonical email
+    let user = Array.from(usersDb.values()).find(
+      (u) => canonicalizeEmail(u.email).canonicalEmail === canonicalEmail
+    );
 
     if (!user) {
+      // 3. Prevent rapid creation of multiple free accounts from the same device
+      device.freeAccountsCreated = device.freeAccountsCreated.filter(
+        (a) => now - a.timestamp < TWENTY_FOUR_HOURS_MS
+      );
+
+      if (device.freeAccountsCreated.length >= MAX_FREE_ACCOUNTS_PER_DEVICE_24H && !isPro) {
+        return res.status(429).json({
+          error: 'ACCOUNT_CREATION_LIMIT_EXCEEDED',
+          message: 'This device has reached the limit for creating new accounts today. Please sign in with your existing account or upgrade to Pro.',
+        });
+      }
+
       const id = 'user_' + Math.random().toString(36).substring(2, 10);
       user = {
         id,
-        email: normalizedEmail,
-        name: name || normalizedEmail.split('@')[0],
+        email: canonicalEmail,
+        name: name || canonicalEmail.split('@')[0],
         isPro: !!isPro,
         queries: [],
       };
       usersDb.set(id, user);
+
+      if (!isPro) {
+        device.freeAccountsCreated.push({ email: canonicalEmail, timestamp: now });
+      }
     } else if (isPro !== undefined) {
       user.isPro = isPro;
     }
 
-    const usage = getUserUsage(user);
+    device.associatedUserIds.add(user.id);
+
+    const usage = getEffectiveUsage(user, resolvedDeviceId, clientIp);
     res.json({
       user: {
         id: user.id,
@@ -139,18 +356,22 @@ app.post('/api/auth/login', (req, res) => {
 
 // Update Pro Subscription Status
 app.post('/api/user/subscription', (req, res) => {
-  const { userId, isPro } = req.body;
+  const { userId, isPro, deviceId } = req.body;
+  const clientIp = getClientIp(req);
   const user = usersDb.get(userId);
   if (!user) {
     return res.status(404).json({ error: 'User not found' });
   }
   user.isPro = Boolean(isPro);
-  res.json({ success: true, isPro: user.isPro, usage: getUserUsage(user) });
+  res.json({ success: true, isPro: user.isPro, usage: getEffectiveUsage(user, deviceId, clientIp) });
 });
 
-// Fetch current usage
+// Fetch current usage (evaluates user + device + IP)
 app.get('/api/user/usage', (req, res) => {
   const userId = (req.query.userId as string) || DEMO_USER_ID;
+  const clientIp = getClientIp(req);
+  const deviceId = (req.query.deviceId as string) || (req.headers['x-device-id'] as string) || `ip_${clientIp}`;
+
   let user = usersDb.get(userId);
   if (!user) {
     user = {
@@ -162,7 +383,7 @@ app.get('/api/user/usage', (req, res) => {
     };
     usersDb.set(userId, user);
   }
-  res.json(getUserUsage(user));
+  res.json(getEffectiveUsage(user, deviceId, clientIp));
 });
 
 // Cloud Sync Endpoint: Sync data across devices
@@ -221,8 +442,76 @@ app.get('/api/sync/:userId', (req, res) => {
   }
 });
 
+// Instant math calculation helper for ultra-fast (0ms) solutions
+function solveDirectMath(
+  message: string,
+  mode: string,
+  currency: string
+): { isSolved: boolean; text: string } {
+  const trimmed = (message || '').trim();
+  const lower = trimmed.toLowerCase();
+
+  // Percentage pattern: "15% of 500" or "what is 20% of 250"
+  const pctMatch = lower.match(/(?:what\s+is\s+|calculate\s+)?([0-9\.]+)\s*%\s*(?:of)\s*([0-9\.]+)/);
+  if (pctMatch) {
+    const rate = parseFloat(pctMatch[1]) / 100;
+    const base = parseFloat(pctMatch[2]);
+    const res = Number((rate * base).toFixed(4));
+    if (mode === 'direct') {
+      return { isSolved: true, text: `**Answer:** ${res}` };
+    }
+    return {
+      isSolved: true,
+      text: `### Calculation: ${pctMatch[1]}% of ${pctMatch[2]}
+- Formula: $\\text{Result} = \\text{Base} \\times \\text{Rate} = ${base} \\times ${rate} = ${res}$
+
+[REVEAL_ANSWER]
+**Final Answer:** **${res}**
+[/REVEAL_ANSWER]`,
+    };
+  }
+
+  // Pure arithmetic: e.g. "25 * 4", "100 / 4 + 15", "sqrt(144)", "(15 + 3) * 8"
+  let mathStr = lower
+    .replace(/^what\s+is\s+/, '')
+    .replace(/^calculate\s+/, '')
+    .replace(/^solve\s+/, '')
+    .replace(/x/g, '*')
+    .replace(/×/g, '*')
+    .replace(/÷/g, '/')
+    .replace(/\^/g, '**')
+    .trim();
+
+  if (/^[0-9\+\-\*\/\(\)\.\s\*\*\*]+$/.test(mathStr) && /[0-9]/.test(mathStr)) {
+    try {
+      const calcResult = Function(`'use strict'; return (${mathStr})`)();
+      if (typeof calcResult === 'number' && !isNaN(calcResult) && isFinite(calcResult)) {
+        const formatted = Number.isInteger(calcResult)
+          ? calcResult.toLocaleString()
+          : Number(calcResult.toFixed(4)).toLocaleString();
+        if (mode === 'direct') {
+          return { isSolved: true, text: `**Answer:** ${formatted}` };
+        }
+        return {
+          isSolved: true,
+          text: `### Calculation: ${trimmed}
+- Expression: $${trimmed} = ${formatted}$
+
+[REVEAL_ANSWER]
+**Final Answer:** **${formatted}**
+[/REVEAL_ANSWER]`,
+        };
+      }
+    } catch {}
+  }
+
+  return { isSolved: false, text: '' };
+}
+
 // Main AI Assistant Solver Endpoint
 app.post('/api/chat', async (req, res) => {
+  const wantsStream = req.body.stream === true || req.headers.accept?.includes('text/event-stream');
+
   try {
     const {
       message = '',
@@ -233,13 +522,20 @@ app.post('/api/chat', async (req, res) => {
       history = [],
       userId = DEMO_USER_ID,
       currency = '$',
+      deviceId: rawDeviceId,
     } = req.body;
 
     if (!message && !image) {
       return res.status(400).json({ error: 'Message or homework image is required' });
     }
 
-    // Verify User and Rate Limit
+    const clientIp = getClientIp(req);
+    const resolvedDeviceId =
+      rawDeviceId ||
+      (req.headers['x-device-id'] as string) ||
+      `ip_${clientIp}`;
+
+    // Verify User
     let user = usersDb.get(userId);
     if (!user) {
       user = {
@@ -252,15 +548,53 @@ app.post('/api/chat', async (req, res) => {
       usersDb.set(userId, user);
     }
 
-    const currentUsage = getUserUsage(user);
+    // Unified Rate Limit: Evaluates both User Account and Hardware Device / IP
+    const currentUsage = getEffectiveUsage(user, resolvedDeviceId, clientIp);
     if (!user.isPro && currentUsage.remainingUses <= 0) {
+      const isDeviceLimit = currentUsage.reason === 'DEVICE_LIMIT';
       return res.status(429).json({
         error: 'DAILY_LIMIT_REACHED',
-        message: 'You have reached your 15 free uses for this 24-hour cycle.',
+        message: isDeviceLimit
+          ? 'This device has reached the limit of 15 free calculations for this 24-hour cycle. Free limits are shared across accounts on this device. Upgrade to Pro for unlimited instant calculations.'
+          : 'You have reached your 15 free uses for this 24-hour cycle.',
         resetInMs: currentUsage.resetInMs,
         nextResetTime: currentUsage.nextResetTime,
         usage: currentUsage,
       });
+    }
+
+    // Instant calculation check for text-only arithmetic/percentages (0ms response)
+    if (!image) {
+      const instant = solveDirectMath(message, teachingMode, currency);
+      if (instant.isSolved) {
+        recordQueryUsage(user, resolvedDeviceId, clientIp);
+        const updatedUsage = getEffectiveUsage(user, resolvedDeviceId, clientIp);
+
+        if (wantsStream) {
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Connection', 'keep-alive');
+          res.write(`data: ${JSON.stringify({ chunk: instant.text })}\n\n`);
+          res.write(
+            `data: ${JSON.stringify({
+              done: true,
+              usage: updatedUsage,
+              teachingMode,
+              assistantMode,
+              timestamp: Date.now(),
+            })}\n\n`
+          );
+          return res.end();
+        } else {
+          return res.json({
+            text: instant.text,
+            teachingMode,
+            assistantMode,
+            usage: updatedUsage,
+            timestamp: Date.now(),
+          });
+        }
+      }
     }
 
     // Assistant Persona Prompts
@@ -456,114 +790,145 @@ CRITICAL RULES — ANSWER WHAT THE USER ASKS (NO REPEATING, NO RANDOM ANSWERS):
         parts: userParts,
       });
 
-      // Model cascade: gemini-3.1-flash-lite (fastest, active vision), gemini-3.8-flash, gemini-flash-latest, gemini-3.1-pro-preview
-      const candidateModels = [
-        'gemini-3.1-flash-lite',
-        'gemini-3.8-flash',
-        'gemini-flash-latest',
-        'gemini-3.1-pro-preview',
-      ];
+      // Precompute graph image if graph mode or graphing keywords requested
+      let graphImageUrl: string | undefined = undefined;
+      const lowerMsg = (message || '').toLowerCase();
+      const isGraphQuery =
+        assistantMode === 'graphs' ||
+        lowerMsg.includes('graph') ||
+        lowerMsg.includes('plot') ||
+        lowerMsg.includes('parabola') ||
+        lowerMsg.includes('curve') ||
+        (image && typeof image === 'string' && image.startsWith('data:image/svg'));
 
-      let modelSucceeded = false;
-
-      // 1. Try multimodal / full contents across candidate models
-      for (const modelName of candidateModels) {
-        try {
-          const response = await ai.models.generateContent({
-            model: modelName,
-            contents: formattedContents,
-            config: {
-              systemInstruction,
-              temperature: 0.15,
-              maxOutputTokens: teachingMode === 'direct' ? 1200 : 3000,
-            },
-          });
-          if (response && response.text) {
-            generatedText = response.text;
-            modelSucceeded = true;
-            break;
-          }
-        } catch (err: any) {
-          console.warn(`Model ${modelName} failed:`, err?.message || err);
-        }
-      }
-
-      // 2. If multimodal failed, retry text-only across candidate models
-      if (!modelSucceeded && userParts.some((p: any) => p && p.inlineData)) {
-        console.warn('Multimodal attempts failed, retrying text-only across candidate models...');
-        const textOnlyContents = formattedContents.map((c) => ({
-          role: c.role,
-          parts: c.parts.filter((p: any) => p && p.text).map((p: any) => ({ text: p.text })),
-        }));
-
-        for (const modelName of candidateModels) {
+      if (isGraphQuery) {
+        if (image && typeof image === 'string' && image.startsWith('data:image/svg')) {
+          graphImageUrl = image;
+        } else {
           try {
-            const fallbackResp = await ai.models.generateContent({
-              model: modelName,
-              contents: textOnlyContents,
-              config: {
-                systemInstruction,
-                temperature: 0.15,
-                maxOutputTokens: teachingMode === 'direct' ? 1200 : 3000,
-              },
-            });
-            if (fallbackResp && fallbackResp.text) {
-              generatedText = fallbackResp.text;
-              modelSucceeded = true;
-              break;
-            }
-          } catch (err: any) {
-            console.warn(`Text-only model ${modelName} failed:`, err?.message || err);
+            const gData = generateGraphData(message);
+            graphImageUrl = gData.svgDataUrl;
+          } catch (e) {
+            console.warn('Could not generate server graph:', e);
           }
         }
       }
 
-      if (!modelSucceeded) {
-        console.warn('All Gemini models failed, activating intelligent local solver...');
+      if (wantsStream) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.flushHeaders?.();
+      }
+
+      let streamSucceeded = false;
+
+      // Try fast streaming with gemini-3.1-flash-lite
+      try {
+        const streamPromise = ai.models.generateContentStream({
+          model: 'gemini-3.1-flash-lite',
+          contents: formattedContents,
+          config: {
+            systemInstruction,
+            temperature: 0.15,
+            maxOutputTokens: teachingMode === 'direct' ? 450 : 2200,
+          },
+        });
+
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Model generation timed out (4800ms)')), 4800)
+        );
+
+        const responseStream = await Promise.race([streamPromise, timeoutPromise]);
+
+        for await (const chunk of responseStream) {
+          const chunkText = chunk.text || '';
+          if (chunkText) {
+            generatedText += chunkText;
+            if (wantsStream) {
+              res.write(`data: ${JSON.stringify({ chunk: chunkText })}\n\n`);
+            }
+          }
+        }
+
+        if (generatedText.trim()) {
+          streamSucceeded = true;
+        }
+      } catch (streamErr: any) {
+        console.warn('Fast stream failed or timed out:', streamErr?.message || streamErr);
+      }
+
+      // If stream failed, fallback to local solver
+      if (!streamSucceeded) {
+        console.warn('Activating rapid intelligent fallback solver...');
         generatedText = generateDevFallbackResponse(message, teachingMode, assistantMode, currency, !!image);
+        if (wantsStream) {
+          res.write(`data: ${JSON.stringify({ chunk: generatedText })}\n\n`);
+        }
+      }
+
+      recordQueryUsage(user, resolvedDeviceId, clientIp);
+      const updatedUsage = getEffectiveUsage(user, resolvedDeviceId, clientIp);
+
+      if (wantsStream) {
+        res.write(
+          `data: ${JSON.stringify({
+            done: true,
+            usage: updatedUsage,
+            teachingMode,
+            assistantMode,
+            timestamp: Date.now(),
+            graphImageUrl: graphImageUrl || undefined,
+          })}\n\n`
+        );
+        return res.end();
+      } else {
+        return res.json({
+          text: generatedText,
+          teachingMode,
+          assistantMode,
+          usage: updatedUsage,
+          timestamp: Date.now(),
+          graphImageUrl: graphImageUrl || undefined,
+        });
       }
     } else {
-      // High-fidelity fallback for offline/development if GEMINI_API_KEY is not configured
+      // Offline fallback when GEMINI_API_KEY is not configured
       generatedText = generateDevFallbackResponse(message, teachingMode, assistantMode, currency, !!image);
-    }
+      recordQueryUsage(user, resolvedDeviceId, clientIp);
+      const updatedUsage = getEffectiveUsage(user, resolvedDeviceId, clientIp);
 
-    // Record query usage on successful generation
-    user.queries.push({ timestamp: Date.now() });
-    const updatedUsage = getUserUsage(user);
-
-    let graphImageUrl: string | undefined = undefined;
-    const lowerMsg = (message || '').toLowerCase();
-    const isGraphQuery =
-      assistantMode === 'graphs' ||
-      lowerMsg.includes('graph') ||
-      lowerMsg.includes('plot') ||
-      lowerMsg.includes('parabola') ||
-      lowerMsg.includes('curve') ||
-      (image && typeof image === 'string' && image.startsWith('data:image/svg'));
-
-    if (isGraphQuery) {
-      if (image && typeof image === 'string' && image.startsWith('data:image/svg')) {
-        graphImageUrl = image;
+      if (wantsStream) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.write(`data: ${JSON.stringify({ chunk: generatedText })}\n\n`);
+        res.write(
+          `data: ${JSON.stringify({
+            done: true,
+            usage: updatedUsage,
+            teachingMode,
+            assistantMode,
+            timestamp: Date.now(),
+          })}\n\n`
+        );
+        return res.end();
       } else {
-        try {
-          const gData = generateGraphData(message);
-          graphImageUrl = gData.svgDataUrl;
-        } catch (e) {
-          console.warn('Could not generate server graph:', e);
-        }
+        return res.json({
+          text: generatedText,
+          teachingMode,
+          assistantMode,
+          usage: updatedUsage,
+          timestamp: Date.now(),
+        });
       }
     }
-
-    res.json({
-      text: generatedText,
-      teachingMode,
-      assistantMode,
-      usage: updatedUsage,
-      timestamp: Date.now(),
-      graphImageUrl: graphImageUrl || undefined,
-    });
   } catch (err: any) {
     console.error('Chat error:', err);
+    if (wantsStream) {
+      res.write(`data: ${JSON.stringify({ error: err.message || 'Processing error' })}\n\n`);
+      return res.end();
+    }
     res.status(500).json({
       error: 'SERVER_ERROR',
       message: err.message || 'An error occurred while processing your math problem.',

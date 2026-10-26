@@ -118,6 +118,8 @@ export interface UserUsage {
   usedInLast24h: number;
   resetInMs: number;
   nextResetTime: number | null;
+  deviceBound?: boolean;
+  reason?: string | null;
 }
 
 export interface UserProfile {

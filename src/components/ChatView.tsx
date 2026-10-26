@@ -103,6 +103,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const [attachedFileName, setAttachedFileName] = useState<string | null>(null);
   const [zoomImage, setZoomImage] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
   const [isGraphModalOpen, setIsGraphModalOpen] = useState(false);
 
   const handleOpenGraphModal = () => {
@@ -180,9 +181,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
   // Handle Image File conversion to base64
   const processImageFile = (file: File) => {
     if (!file || !file.type.startsWith('image/')) {
-      alert('Please select an image file (e.g. photo of your homework worksheet).');
+      setFileError('Please select a valid image file (photo or screenshot of your worksheet).');
+      setTimeout(() => setFileError(null), 4000);
       return;
     }
+    setFileError(null);
     const reader = new FileReader();
     reader.onload = (e) => {
       const result = e.target?.result as string;
@@ -269,6 +272,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
   // Text-To-Speech reader
   const handleToggleSpeech = (id: string, text: string) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+
     if (speakingId === id) {
       window.speechSynthesis.cancel();
       setSpeakingId(null);
@@ -533,7 +538,12 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   )}
 
                   {/* Message Content: Direct Answer vs Teach Me with Reveal Button */}
-                  {isUser ? (
+                  {!isUser && !message.content ? (
+                    <div className="flex items-center gap-2 py-1.5 text-xs opacity-80">
+                      <span className="w-2 h-2 rounded-full bg-indigo-400 animate-ping" />
+                      <span className="italic">Cipher is calculating...</span>
+                    </div>
+                  ) : isUser ? (
                     <div className="text-sm sm:text-base leading-relaxed whitespace-pre-wrap">
                       {message.content}
                     </div>
@@ -621,8 +631,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
           })
         )}
 
-        {/* Loading Indicator */}
-        {isLoading && (
+        {/* Loading Indicator when awaiting response */}
+        {isLoading && (!session.messages.length || session.messages[session.messages.length - 1]?.role === 'user') && (
           <div className="flex gap-3 sm:gap-4 justify-start">
             <div
               className={`w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 mt-1 shadow-sm ${themeConfig.classes.bgCard} ${themeConfig.classes.border}`}
@@ -645,6 +655,18 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
       {/* Input Area */}
       <div className="shrink-0 pb-4 pt-2">
+        {fileError && (
+          <div className="mb-2 p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-center justify-between animate-fadeIn">
+            <span>{fileError}</span>
+            <button
+              onClick={() => setFileError(null)}
+              className="text-xs font-bold text-rose-300 hover:text-white"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
         {/* Daily limit reached banner */}
         {isLimitReached ? (
           <div

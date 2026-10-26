@@ -1,5 +1,8 @@
 import { ChatSession, ReviewItem, UserProfile, UserUsage } from '../types';
 import { INITIAL_FORMULAS, INITIAL_SESSIONS } from './defaultData';
+import { getOrCreateDeviceId } from './deviceFingerprint';
+
+export const getDeviceId = getOrCreateDeviceId;
 
 const STORAGE_KEYS = {
   SESSIONS: 'cipher_sessions_v1',
@@ -218,7 +221,15 @@ export async function syncWithCloud(
 
 export async function fetchServerUsage(userId: string): Promise<UserUsage | null> {
   try {
-    const res = await fetch(`/api/user/usage?userId=${encodeURIComponent(userId)}`);
+    const deviceId = getOrCreateDeviceId();
+    const res = await fetch(
+      `/api/user/usage?userId=${encodeURIComponent(userId)}&deviceId=${encodeURIComponent(deviceId)}`,
+      {
+        headers: {
+          'X-Device-Id': deviceId,
+        },
+      }
+    );
     if (res.ok) {
       const data = await res.json();
       return data;

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ReviewItem } from '../types';
 import { ScientificCalculator } from './Calculators/ScientificCalculator';
+import { FinancialCalculators } from './Calculators/FinancialCalculators';
 import { MathRenderer } from './MathRenderer';
 import { useTheme } from '../utils/themeConfig';
 import {
@@ -14,8 +15,8 @@ import {
   ArrowRight,
   ExternalLink,
   BookOpen,
+  DollarSign,
 } from 'lucide-react';
-import katex from 'katex';
 
 interface ReviewCenterProps {
   items: ReviewItem[];
@@ -33,7 +34,7 @@ export const ReviewCenter: React.FC<ReviewCenterProps> = ({
   onOpenChatWithProblem,
 }) => {
   const { themeConfig } = useTheme();
-  const [activeTab, setActiveTab] = useState<'saved' | 'calculator' | 'cheatsheet'>('saved');
+  const [activeTab, setActiveTab] = useState<'saved' | 'calculator' | 'financial' | 'cheatsheet'>('saved');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
 
@@ -234,7 +235,12 @@ export const ReviewCenter: React.FC<ReviewCenterProps> = ({
         <ScientificCalculator onSendToChat={onOpenChatWithProblem} />
       )}
 
-      {/* TAB 3: FORMULA CHEATSHEET */}
+      {/* TAB 3: BUSINESS & FINANCIAL CALCULATORS */}
+      {activeTab === 'financial' && (
+        <FinancialCalculators currency={currency} onSendToChat={onOpenChatWithProblem} />
+      )}
+
+      {/* TAB 4: FORMULA CHEATSHEET */}
       {activeTab === 'cheatsheet' && (
         <div className="space-y-6">
           <div className={`p-5 rounded-3xl border ${themeConfig.classes.bgCard} ${themeConfig.classes.border}`}>
