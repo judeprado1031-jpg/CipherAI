@@ -150,18 +150,32 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
   // Helper to split "Teach Me" content into method steps vs hidden final answer
   const parseTeachMeContent = (rawContent: string) => {
-    const revealMatch = rawContent.match(/\[REVEAL_ANSWER\]([\s\S]*?)\[\/REVEAL_ANSWER\]/);
-    if (revealMatch) {
-      const steps = rawContent.replace(/\[REVEAL_ANSWER\][\s\S]*?\[\/REVEAL_ANSWER\]/, '').trim();
-      const answer = revealMatch[1].trim();
-      return { steps, answer };
+    if (!rawContent) return { steps: '', answer: null };
+
+    // 1. Check for [REVEAL_ANSWER] tag (handles both completed and in-flight streaming)
+    const openTagIdx = rawContent.indexOf('[REVEAL_ANSWER]');
+    if (openTagIdx !== -1) {
+      let steps = rawContent.slice(0, openTagIdx).trim();
+      // Remove any trailing "Final Answer:" preamble from steps
+      steps = steps.replace(/(?:Therefore,?\s*(?:the\s*)?)?(?:Final\s*)?Answer:?\s*$/i, '').trim();
+
+      const remainder = rawContent.slice(openTagIdx + '[REVEAL_ANSWER]'.length);
+      const closeTagIdx = remainder.indexOf('[/REVEAL_ANSWER]');
+      const answer = closeTagIdx !== -1 
+        ? remainder.slice(0, closeTagIdx).trim()
+        : remainder.trim();
+
+      return { steps, answer: answer || null };
     }
 
-    // Secondary heuristic parsing for common headers
+    // 2. Secondary heuristic parsing for common headers if tags omitted
     const patterns = [
-      /\n(?=### (?:4\.\s*)?Final (?:Answer|Conclusion))/i,
-      /\n(?=#### (?:4\.\s*)?Final (?:Answer|Conclusion))/i,
-      /\n(?=\*\*Final Answer:\*\*)/i,
+      /\n(?=### (?:[0-9]+\.\s*)?Final (?:Answer|Conclusion))/i,
+      /\n(?=#### (?:[0-9]+\.\s*)?Final (?:Answer|Conclusion))/i,
+      /\n(?=\*\*Final Answer:?\*\*)/i,
+      /\n(?=Final Answer:?)/i,
+      /\n(?=\*\*Answer:?\*\*)/i,
+      /\n(?=Answer:\s*[0-9\$₱])/i,
       /\n(?=\$\$\\mathbf{\\text{Adjusted)/i,
     ];
 
@@ -176,6 +190,20 @@ export const ChatView: React.FC<ChatViewProps> = ({
     }
 
     return { steps: rawContent, answer: null };
+  };
+
+  // Helper for Direct Answer mode: strictly extracts only the final answer
+  const cleanDirectAnswer = (rawContent: string): string => {
+    if (!rawContent) return '';
+    // If [REVEAL_ANSWER] is present, take only what is inside
+    const openTagIdx = rawContent.indexOf('[REVEAL_ANSWER]');
+    if (openTagIdx !== -1) {
+      const remainder = rawContent.slice(openTagIdx + '[REVEAL_ANSWER]'.length);
+      const closeTagIdx = remainder.indexOf('[/REVEAL_ANSWER]');
+      return (closeTagIdx !== -1 ? remainder.slice(0, closeTagIdx) : remainder).trim();
+    }
+    // Remove tags if any
+    return rawContent.replace(/\[\/?REVEAL_ANSWER\]/g, '').trim();
   };
 
   // Handle Image File conversion to base64
@@ -550,7 +578,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   ) : isDirectAnswer ? (
                     /* DIRECT ANSWER MODE: Shows answer only, nothing more nothing less */
                     <div className="text-base sm:text-lg font-bold font-mono tracking-wide py-1">
-                      <MathRenderer content={message.content} />
+                      <MathRenderer content={cleanDirectAnswer(message.content)} />
                     </div>
                   ) : (
                     /* TEACH ME MODE: Shows how it is done, with Reveal Button to show the answer */

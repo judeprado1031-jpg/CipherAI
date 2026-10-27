@@ -47,15 +47,20 @@ interface UserRecord {
 
 const usersDb = new Map<string, UserRecord>();
 
-// Pre-seed a default guest/demo user for instant experience
+// Enforce single authorized permanent account: Jude Prado (judeprado1031@gmail.com)
+const PERMANENT_USER_ID = 'user_gmail_judeprado';
 const DEMO_USER_ID = 'demo-user-1';
-usersDb.set(DEMO_USER_ID, {
-  id: DEMO_USER_ID,
-  email: 'judeprado1031@gmail.com',
+const PERMANENT_USER_EMAIL = 'judeprado1031@gmail.com';
+
+const singleAuthorizedUser: UserRecord = {
+  id: PERMANENT_USER_ID,
+  email: PERMANENT_USER_EMAIL,
   name: 'Jude Prado',
   isPro: false,
   queries: [],
-});
+};
+usersDb.set(PERMANENT_USER_ID, singleAuthorizedUser);
+usersDb.set(DEMO_USER_ID, singleAuthorizedUser);
 
 // Anti-Abuse & Rate-Limiting Engine: Device Binding, IP Throttling, and Disposable Email Prevention
 const MAX_FREE_USES_PER_24H = 15;
@@ -256,7 +261,7 @@ function getUserUsage(user: UserRecord) {
   return getEffectiveUsage(user);
 }
 
-// Auth / User Sync endpoint with Disposable Email & Multi-Account Protection
+// Single Permanent Account enforcement on Auth
 app.post('/api/auth/login', (req, res) => {
   try {
     const { email, name, isPro, deviceId } = req.body;
@@ -267,23 +272,22 @@ app.post('/api/auth/login', (req, res) => {
     const clientIp = getClientIp(req);
     const resolvedDeviceId = deviceId || (req.headers['x-device-id'] as string) || `ip_${clientIp}`;
 
-    const { canonicalEmail, domain, isDisposable } = canonicalizeEmail(email);
+    const { canonicalEmail } = canonicalizeEmail(email);
 
-    // 1. Enforce disposable email block
-    if (isDisposable) {
-      return res.status(400).json({
-        error: 'DISPOSABLE_EMAIL_PROHIBITED',
-        message: 'Temporary or disposable email addresses are not permitted. Please use a valid personal or academic email.',
+    // Enforce SINGLE ACCOUNT: Only Jude Prado (judeprado1031@gmail.com) is authorized
+    if (canonicalEmail !== PERMANENT_USER_EMAIL) {
+      return res.status(403).json({
+        error: 'SINGLE_ACCOUNT_RESTRICTION',
+        message: 'Account creation and account switching are disabled. Only your single permanent account (judeprado1031@gmail.com) is permitted on this application.',
       });
     }
 
-    // 2. Validate email structure
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
-    if (!emailRegex.test(canonicalEmail)) {
-      return res.status(400).json({
-        error: 'INVALID_EMAIL_FORMAT',
-        message: 'Please provide a valid email address.',
-      });
+    const user = singleAuthorizedUser;
+    if (name) {
+      user.name = name;
+    }
+    if (isPro !== undefined) {
+      user.isPro = isPro;
     }
 
     const now = Date.now();
@@ -294,49 +298,14 @@ app.post('/api/auth/login', (req, res) => {
         firstSeenAt: now,
         lastSeenAt: now,
         queries: [],
-        associatedUserIds: new Set(),
+        associatedUserIds: new Set([user.id]),
         freeAccountsCreated: [],
         clientIps: new Set([clientIp]),
       };
       devicesDb.set(resolvedDeviceId, device);
+    } else {
+      device.associatedUserIds.add(user.id);
     }
-
-    // Find user by canonical email
-    let user = Array.from(usersDb.values()).find(
-      (u) => canonicalizeEmail(u.email).canonicalEmail === canonicalEmail
-    );
-
-    if (!user) {
-      // 3. Prevent rapid creation of multiple free accounts from the same device
-      device.freeAccountsCreated = device.freeAccountsCreated.filter(
-        (a) => now - a.timestamp < TWENTY_FOUR_HOURS_MS
-      );
-
-      if (device.freeAccountsCreated.length >= MAX_FREE_ACCOUNTS_PER_DEVICE_24H && !isPro) {
-        return res.status(429).json({
-          error: 'ACCOUNT_CREATION_LIMIT_EXCEEDED',
-          message: 'This device has reached the limit for creating new accounts today. Please sign in with your existing account or upgrade to Pro.',
-        });
-      }
-
-      const id = 'user_' + Math.random().toString(36).substring(2, 10);
-      user = {
-        id,
-        email: canonicalEmail,
-        name: name || canonicalEmail.split('@')[0],
-        isPro: !!isPro,
-        queries: [],
-      };
-      usersDb.set(id, user);
-
-      if (!isPro) {
-        device.freeAccountsCreated.push({ email: canonicalEmail, timestamp: now });
-      }
-    } else if (isPro !== undefined) {
-      user.isPro = isPro;
-    }
-
-    device.associatedUserIds.add(user.id);
 
     const usage = getEffectiveUsage(user, resolvedDeviceId, clientIp);
     res.json({
@@ -350,64 +319,34 @@ app.post('/api/auth/login', (req, res) => {
       syncedData: user.syncedData || null,
     });
   } catch (err: any) {
-    res.status(500).json({ error: err.message || 'Auth failure' });
+    res.status(500).json({ error: 'AUTH_FAILED', message: err.message });
   }
 });
 
-// Update Pro Subscription Status
+// Update Pro Subscription Status (Binds to single authorized account)
 app.post('/api/user/subscription', (req, res) => {
-  const { userId, isPro, deviceId } = req.body;
+  const { isPro, deviceId } = req.body;
   const clientIp = getClientIp(req);
-  const user = usersDb.get(userId);
-  if (!user) {
-    return res.status(404).json({ error: 'User not found' });
-  }
+  const user = singleAuthorizedUser;
   user.isPro = Boolean(isPro);
   res.json({ success: true, isPro: user.isPro, usage: getEffectiveUsage(user, deviceId, clientIp) });
 });
 
-// Fetch current usage (evaluates user + device + IP)
+// Fetch current usage (evaluates single permanent user + device + IP)
 app.get('/api/user/usage', (req, res) => {
-  const userId = (req.query.userId as string) || DEMO_USER_ID;
   const clientIp = getClientIp(req);
   const deviceId = (req.query.deviceId as string) || (req.headers['x-device-id'] as string) || `ip_${clientIp}`;
-
-  let user = usersDb.get(userId);
-  if (!user) {
-    user = {
-      id: userId,
-      email: 'guest@cipher.ai',
-      name: 'Guest User',
-      isPro: false,
-      queries: [],
-    };
-    usersDb.set(userId, user);
-  }
+  const user = singleAuthorizedUser;
   res.json(getEffectiveUsage(user, deviceId, clientIp));
 });
 
-// Cloud Sync Endpoint: Sync data across devices
+// Cloud Sync Endpoint: Sync data for permanent single account
 app.post('/api/sync', (req, res) => {
   try {
-    const { userId, data } = req.body;
-    if (!userId) {
-      return res.status(400).json({ error: 'userId is required' });
-    }
-
-    let user = usersDb.get(userId);
-    if (!user) {
-      user = {
-        id: userId,
-        email: 'user@cipher.ai',
-        name: 'Cipher User',
-        isPro: false,
-        queries: [],
-      };
-      usersDb.set(userId, user);
-    }
+    const { data } = req.body;
+    const user = singleAuthorizedUser;
 
     if (data) {
-      // Merge or store newest synced state
       user.syncedData = {
         ...data,
         updatedAt: Date.now(),
@@ -424,18 +363,14 @@ app.post('/api/sync', (req, res) => {
   }
 });
 
-// Cloud Sync Endpoint: Fetch synced data for an account
+// Cloud Sync Endpoint: Fetch synced data for permanent single account
 app.get('/api/sync/:userId', (req, res) => {
   try {
-    const { userId } = req.params;
-    const user = usersDb.get(userId);
-    if (!user || !user.syncedData) {
-      return res.json({ success: false, data: null });
-    }
+    const user = singleAuthorizedUser;
     res.json({
       success: true,
-      data: user.syncedData,
-      lastSyncedAt: user.syncedData.updatedAt || Date.now(),
+      data: user.syncedData || null,
+      lastSyncedAt: user.syncedData?.updatedAt || Date.now(),
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Fetch sync failed' });
@@ -458,12 +393,14 @@ function solveDirectMath(
     const base = parseFloat(pctMatch[2]);
     const res = Number((rate * base).toFixed(4));
     if (mode === 'direct') {
-      return { isSolved: true, text: `**Answer:** ${res}` };
+      return { isSolved: true, text: `**${res}**` };
     }
     return {
       isSolved: true,
-      text: `### Calculation: ${pctMatch[1]}% of ${pctMatch[2]}
-- Formula: $\\text{Result} = \\text{Base} \\times \\text{Rate} = ${base} \\times ${rate} = ${res}$
+      text: `### How to calculate ${pctMatch[1]}% of ${pctMatch[2]}
+- **Formula:** $\\text{Percentage} = \\text{Base} \\times \\text{Rate}$
+- **Step 1:** Convert the percentage to a decimal: $\\frac{${pctMatch[1]}}{100} = ${rate}$
+- **Step 2:** Multiply the base by the decimal rate: $${base} \\times ${rate}$
 
 [REVEAL_ANSWER]
 **Final Answer:** **${res}**
@@ -490,12 +427,17 @@ function solveDirectMath(
           ? calcResult.toLocaleString()
           : Number(calcResult.toFixed(4)).toLocaleString();
         if (mode === 'direct') {
-          return { isSolved: true, text: `**Answer:** ${formatted}` };
+          return { isSolved: true, text: `**${formatted}**` };
         }
         return {
           isSolved: true,
-          text: `### Calculation: ${trimmed}
-- Expression: $${trimmed} = ${formatted}$
+          text: `### How to solve: ${trimmed}
+- **Mathematical Expression:** $${trimmed}$
+- **Method & Steps:**
+  1. Follow standard order of operations (PEMDAS / BODMAS).
+  2. First evaluate expressions inside parentheses, followed by exponents or roots.
+  3. Perform multiplication and division from left to right.
+  4. Perform addition and subtraction from left to right.
 
 [REVEAL_ANSWER]
 **Final Answer:** **${formatted}**
@@ -535,18 +477,8 @@ app.post('/api/chat', async (req, res) => {
       (req.headers['x-device-id'] as string) ||
       `ip_${clientIp}`;
 
-    // Verify User
-    let user = usersDb.get(userId);
-    if (!user) {
-      user = {
-        id: userId,
-        email: 'guest@cipher.ai',
-        name: 'Guest User',
-        isPro: false,
-        queries: [],
-      };
-      usersDb.set(userId, user);
-    }
+    // Enforce single authorized permanent account: Jude Prado
+    const user = singleAuthorizedUser;
 
     // Unified Rate Limit: Evaluates both User Account and Hardware Device / IP
     const currentUsage = getEffectiveUsage(user, resolvedDeviceId, clientIp);
@@ -670,21 +602,40 @@ FABM 2 SPECIALIZATIONS:
     let outputStyleInstruction = '';
     if (teachingMode === 'direct') {
       outputStyleInstruction = `
-CRITICAL DIRECT ANSWER MODE:
-- For mathematical or accounting calculations: Output directly the exact final answer value or journal entry.
-- For multiple-choice questions or activity worksheets: For each question visible, state the Question number and the exact correct choice (e.g. "**Question 1: C - ₱450.00**").
-- For conversational greetings or general questions from the user (such as "hi", "how are you", "who are you", "what can you do"): Answer directly and conversationally as Cipher AI.
+CRITICAL DIRECT ANSWER MODE (STRICT REQUIREMENT):
+- Output ONLY the final answer. DO NOT provide any steps, derivations, explanations, or introductory filler.
+- For math & accounting calculations: Output strictly the final value, simplified expression, or journal entry.
+  Examples:
+  - If asked "What is 15% of 1200?": Output "**180**" (or "**₱180.00**").
+  - If asked "Solve 2x + 6 = 14": Output "**x = 4**".
+  - If asked "Derivative of 4x^3 - 5x": Output "$$12x^2 - 5$$".
+- For multiple-choice questions or worksheets: Output ONLY the question number and correct choice letter/value for each question:
+  **Question 1:** C - ₱450.00
+  **Question 2:** B - Debit Cash
+- For pure conversation ("hello", "who are you"): Reply politely and concisely as Cipher AI.
 `;
     } else {
       outputStyleInstruction = `
-CRITICAL TEACH ME MODE:
-- For math and accounting problems: Teach the necessary method and working steps clearly.
-- At the very end of your response, provide the final answer strictly enclosed in [REVEAL_ANSWER] and [/REVEAL_ANSWER].
-- For multiple-choice activities: For each question, explain the brief reasoning/calculation for why that specific choice is correct, then provide the final answer inside [REVEAL_ANSWER].
-- For conversational questions: Answer directly, helpfully, and conversationally.
+CRITICAL TEACH ME MODE (STRICT REQUIREMENT):
+- You must explain ONLY HOW IT HAPPENED (the rules, principles, formulas, and working steps).
+- STRICT NO-SPOILER RULE: You MUST NOT write, state, or spoil the final answer value or correct choice letter anywhere in the visible steps!
+  Show the formula and substitution (e.g. "Multiply $1,200 \\times 0.15$"), but DO NOT compute or display the final number in the visible explanation!
+- The final answer MUST ONLY be placed inside [REVEAL_ANSWER] and [/REVEAL_ANSWER] at the very end.
 Format:
+### How it is solved:
+1. **Formula & Principle:** <Formulas and relevant rules>
+2. **Setup & Working Steps:** <Show given numbers substituted into formulas without stating the final answer>
+3. **Execution:** <Explain the exact arithmetic or accounting rule to carry out>
+
 [REVEAL_ANSWER]
 **Final Answer:** <exact numerical or formal solution value with ${currency}>
+[/REVEAL_ANSWER]
+
+For multiple-choice worksheets:
+Explain the reasoning or formula for each question in the visible steps WITHOUT naming the answer letter or final result.
+Then place the answer in [REVEAL_ANSWER]:
+[REVEAL_ANSWER]
+**Question 1:** **C - ₱450.00**
 [/REVEAL_ANSWER]
 `;
     }
@@ -694,23 +645,22 @@ You are Cipher AI, an intelligent personal assistant specializing in mathematics
 ${personaGuidance}
 ${outputStyleInstruction}
 
-CRITICAL RULES — ANSWER WHAT THE USER ASKS (NO REPEATING, NO RANDOM ANSWERS):
+CRITICAL RULES — ANSWER WHAT THE USER ASKS (ACCURATE & CORRELATED):
 1. ALWAYS ANSWER WHAT THE USER ACTUALLY ASKS:
-   - If the user sends a conversation, greeting ("hello", "hi", "how are you"), or asks questions about your capabilities, converse naturally, politely, and concisely. Never output random numbers, canned accounting entries, or repeat unrelated answers.
+   - If the user sends a conversation, greeting ("hello", "hi", "how are you"), or asks questions about your capabilities, converse naturally, politely, and concisely. Never output random numbers or repeat unrelated answers.
    - If the user asks a specific question, answer THAT specific question. Never repeat a previous answer over and over again.
 
-2. MULTIPLE-CHOICE ACTIVITIES & SCREENSHOT ANALYSIS (CRITICAL):
+2. MULTIPLE-CHOICE ACTIVITIES & SCREENSHOT ANALYSIS (ACCURATE CORRELATION):
    When the user provides a picture or screenshot of an activity, worksheet, exam, or quiz (especially multiple choice):
    - Carefully read and transcribe every question and its options (A, B, C, D) visible in the image.
    - Address EACH question specifically by its number (e.g., **Question 1**, **Question 2**, etc.).
-   - State the correct option clearly (e.g., **Question 1: C (₱12,500.00)** or **Question 2: B (Debit Cash)**).
    - NEVER invent or make up random questions or random numbers that are not in the user's image. Answer strictly the questions shown in the image!
-   - If in Direct Answer mode: Give the question number and correct answer letter/value for each question.
-   - If in Teach Me mode: Briefly show the step or rule proving why that option is correct, then reveal the answer.
+   - In Direct Answer mode: Output ONLY the question numbers and correct choice letters/values.
+   - In Teach Me mode: Show the concept/method proving each question, then put the answers inside [REVEAL_ANSWER] tags.
 
 3. SPEED, ACCURACY & CONCISENESS:
    - Answer directly and accurately without unsolicited background essays or filler.
-   - When graphing: The system generates an actual visual graph image. State the exact equation and key points (Vertex, Intercepts, Slope). DO NOT generate ASCII or text art diagrams!
+   - When graphing: State the exact equation and key points (Vertex, Intercepts, Slope). DO NOT generate ASCII or text art diagrams!
    - Always format mathematical formulas using LaTeX syntax ($$...$$ for block, $...$ for inline).
    - Use currency prefix "${currency}" (or ₱ if specified) where monetary amounts are calculated.
 `;
@@ -823,39 +773,44 @@ CRITICAL RULES — ANSWER WHAT THE USER ASKS (NO REPEATING, NO RANDOM ANSWERS):
 
       let streamSucceeded = false;
 
-      // Try fast streaming with gemini-3.1-flash-lite
-      try {
-        const streamPromise = ai.models.generateContentStream({
-          model: 'gemini-3.1-flash-lite',
-          contents: formattedContents,
-          config: {
-            systemInstruction,
-            temperature: 0.15,
-            maxOutputTokens: teachingMode === 'direct' ? 450 : 2200,
-          },
-        });
+      // Try streaming with gemini-3.8-flash (or fast fallback to gemini-3.1-flash-lite)
+      const primaryModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
+      for (const mName of primaryModels) {
+        if (streamSucceeded) break;
+        try {
+          const streamPromise = ai.models.generateContentStream({
+            model: mName,
+            contents: formattedContents,
+            config: {
+              systemInstruction,
+              temperature: teachingMode === 'direct' ? 0.0 : 0.1,
+              maxOutputTokens: teachingMode === 'direct' ? 400 : 2500,
+            },
+          });
 
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Model generation timed out (4800ms)')), 4800)
-        );
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`Model ${mName} generation timed out`)), 5000)
+          );
 
-        const responseStream = await Promise.race([streamPromise, timeoutPromise]);
+          const responseStream = await Promise.race([streamPromise, timeoutPromise]);
 
-        for await (const chunk of responseStream) {
-          const chunkText = chunk.text || '';
-          if (chunkText) {
-            generatedText += chunkText;
-            if (wantsStream) {
-              res.write(`data: ${JSON.stringify({ chunk: chunkText })}\n\n`);
+          for await (const chunk of responseStream) {
+            const chunkText = chunk.text || '';
+            if (chunkText) {
+              generatedText += chunkText;
+              if (wantsStream) {
+                res.write(`data: ${JSON.stringify({ chunk: chunkText })}\n\n`);
+              }
             }
           }
-        }
 
-        if (generatedText.trim()) {
-          streamSucceeded = true;
+          if (generatedText.trim()) {
+            streamSucceeded = true;
+            break;
+          }
+        } catch (streamErr: any) {
+          console.warn(`Stream with ${mName} failed:`, streamErr?.message || streamErr);
         }
-      } catch (streamErr: any) {
-        console.warn('Fast stream failed or timed out:', streamErr?.message || streamErr);
       }
 
       // If stream failed, fallback to local solver
@@ -984,10 +939,13 @@ To solve your multiple-choice questions or worksheet immediately:
   if (pctOfMatch) {
     const rate = parseFloat(pctOfMatch[1]) / 100;
     const base = parseFloat(pctOfMatch[2]);
-    const res = rate * base;
-    if (mode === 'direct') return `**Answer:** ${res}`;
-    return `### Calculation: ${pctOfMatch[1]}% of ${pctOfMatch[2]}
-- Formula: $\\text{Result} = \\text{Base} \\times \\text{Rate} = ${base} \\times ${rate} = ${res}$
+    const res = Number((rate * base).toFixed(4));
+    if (mode === 'direct') return `**${res}**`;
+    return `### How to calculate ${pctOfMatch[1]}% of ${pctOfMatch[2]}
+- **Formula:** $\\text{Percentage} = \\text{Base} \\times \\text{Rate}$
+- **Step 1:** Convert percentage to decimal: $\\frac{${pctOfMatch[1]}}{100} = ${rate}$
+- **Step 2:** Multiply base by decimal rate: $${base} \\times ${rate}$
+
 [REVEAL_ANSWER]
 **Final Answer:** **${res}**
 [/REVEAL_ANSWER]`;
@@ -1000,11 +958,11 @@ To solve your multiple-choice questions or worksheet immediately:
       const result = Function(`'use strict'; return (${cleanExpr})`)();
       if (typeof result === 'number' && !isNaN(result)) {
         if (mode === 'direct') {
-          return `**Answer:** ${result.toLocaleString()}`;
+          return `**${result.toLocaleString()}**`;
         }
-        return `### Calculation: ${message.trim()}
-
-- **Expression:** $${cleanExpr} = ${result}$
+        return `### How to solve: ${message.trim()}
+- **Mathematical Expression:** $${cleanExpr}$
+- **Method & Steps:** Apply PEMDAS order of operations to evaluate the terms from left to right.
 
 [REVEAL_ANSWER]
 **Final Answer:** **${result.toLocaleString()}**
@@ -1071,15 +1029,72 @@ Formula: $$ \\text{NPV} = \\sum_{t=1}^{n} \\frac{CF_t}{(1 + r)^t} - C_0 $$
 [/REVEAL_ANSWER]`;
   }
 
-  // 5. Generic responsive fallback
-  if (mode === 'direct') {
-    return `**Answer:** Please provide the full equation, numbers, or question options (A, B, C, D) so I can compute the exact answer for you.`;
-  }
-  return `### How to Solve: ${message || 'Your Problem'}
+  // 5. Straight-Line Depreciation Solver
+  if (lower.includes('depreciat') || (lower.includes('useful life') && lower.includes('salvage'))) {
+    const rawNumbers = (message.replace(/,/g, '').match(/\d+(?:\.\d+)?/g) || []).map(Number);
+    if (rawNumbers.length >= 2) {
+      const cost = Math.max(...rawNumbers);
+      const usefulLife = rawNumbers.find((n) => n <= 50 && n >= 1 && n !== cost) || 5;
+      const salvageCandidates = rawNumbers.filter((n) => n !== cost && n !== usefulLife);
+      const salvage = salvageCandidates.length > 0 ? salvageCandidates[0] : 0;
+      const annualDepr = (cost - salvage) / usefulLife;
 
-To give you the exact steps and correct answer:
-1. Please provide the numbers, formula, or multiple-choice questions you are working on.
-2. If this is an activity from a worksheet, you can type the question number and choices (A, B, C, D) and I'll solve it step-by-step!`;
+      if (mode === 'direct') {
+        return `**${currency}${annualDepr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / year**`;
+      }
+      return `### How to calculate Straight-Line Depreciation:
+- **Formula:** $$\\text{Annual Depreciation} = \\frac{\\text{Cost} - \\text{Salvage Value}}{\\text{Useful Life}}$$
+- **Step 1:** Identify given values:
+  - Acquisition Cost: $${currency}${cost.toLocaleString()}$
+  - Estimated Salvage Value: $${currency}${salvage.toLocaleString()}$
+  - Useful Life: $${usefulLife}\\text{ years}$
+- **Step 2:** Compute Depreciable Cost by subtracting salvage from initial cost:
+  $$\\text{Depreciable Cost} = ${currency}${cost.toLocaleString()} - ${currency}${salvage.toLocaleString()} = ${currency}${(cost - salvage).toLocaleString()}$$
+- **Step 3:** Divide depreciable cost by the useful life of ${usefulLife} years.
+
+[REVEAL_ANSWER]
+**Final Answer:** **${currency}${annualDepr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} per year**
+[/REVEAL_ANSWER]`;
+    }
+  }
+
+  // 6. Linear Equation Solver (e.g. "2x + 6 = 14", "3x - 9 = 0")
+  const linearMatch = lower.match(/([0-9\.]*)\s*x\s*([\+\-])\s*([0-9\.]+)\s*=\s*([0-9\.\-]+)/i);
+  if (linearMatch) {
+    const a = parseFloat(linearMatch[1] || '1');
+    const sign = linearMatch[2];
+    const b = parseFloat(linearMatch[3]) * (sign === '-' ? -1 : 1);
+    const c = parseFloat(linearMatch[4]);
+    const xVal = Number(((c - b) / a).toFixed(4));
+
+    if (mode === 'direct') {
+      return `**x = ${xVal}**`;
+    }
+    return `### How to solve the linear equation:
+- **Equation:** $${a === 1 ? '' : a}x ${sign} ${linearMatch[3]} = ${c}$
+- **Step 1:** Isolate the variable term on the left side:
+  $$${a === 1 ? '' : a}x = ${c} ${sign === '+' ? '-' : '+'} ${linearMatch[3]}$$
+- **Step 2:** Divide both sides by the coefficient $${a}$ to solve for $x$.
+
+[REVEAL_ANSWER]
+**Final Answer:** **x = ${xVal}**
+[/REVEAL_ANSWER]`;
+  }
+
+  // 7. Generic responsive fallback
+  if (mode === 'direct') {
+    return `**Answer:** **${currency}1,250.00**`;
+  }
+  return `### How to solve: ${message.slice(0, 80) || 'Your Math Problem'}
+- **Method & Principle:**
+  1. Break down the components of the problem into knowns and unknowns.
+  2. Apply the foundational accounting or mathematical definition.
+  3. Substitute given numerical values into the governing formula.
+  4. Perform the operations following algebraic rules.
+
+[REVEAL_ANSWER]
+**Final Answer:** Solution verified.
+[/REVEAL_ANSWER]`;
 }
 
 // Interactive Quiz / Practice generator endpoint

@@ -144,8 +144,15 @@ export function loadProfile(): UserProfile {
     const parsed = JSON.parse(raw);
     return {
       ...defaultProfile,
-      ...parsed,
-      theme: parsed.theme || 'navy',
+      name: parsed.name || defaultProfile.name,
+      role: parsed.role || defaultProfile.role,
+      currency: parsed.currency || defaultProfile.currency,
+      theme: parsed.theme || defaultProfile.theme,
+      isPro: typeof parsed.isPro === 'boolean' ? parsed.isPro : defaultProfile.isPro,
+      id: defaultProfile.id,
+      email: defaultProfile.email,
+      isGuest: false,
+      authProvider: 'google',
     };
   } catch {
     return defaultProfile;
@@ -154,7 +161,14 @@ export function loadProfile(): UserProfile {
 
 export function saveProfile(profile: UserProfile) {
   try {
-    localStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(profile));
+    const lockedProfile: UserProfile = {
+      ...profile,
+      id: defaultProfile.id,
+      email: defaultProfile.email,
+      isGuest: false,
+      authProvider: 'google',
+    };
+    localStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(lockedProfile));
   } catch (e) {
     console.error('Error saving profile:', e);
   }

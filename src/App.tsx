@@ -37,7 +37,6 @@ import { ChatView } from './components/ChatView';
 import { ReviewCenter } from './components/ReviewCenter';
 import { AccountModal } from './components/AccountModal';
 import { SubscriptionModal } from './components/SubscriptionModal';
-import { AuthModal } from './components/AuthModal';
 import { QuizModal } from './components/QuizModal';
 import { GraphModal } from './components/GraphModal';
 import { generateGraphData } from './utils/graphGenerator';
@@ -68,7 +67,6 @@ export default function App() {
   const [isQuizOpen, setIsQuizOpen] = useState(false);
   const [isReviewCenterOpen, setIsReviewCenterOpen] = useState(false);
   const [isAccountOpen, setIsAccountOpen] = useState(false);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -189,97 +187,12 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  // Handler: Log In with Google (Gmail)
-  const handleLoginWithGoogle = (email = 'judeprado1031@gmail.com', name = 'Jude Prado') => {
-    const updatedProfile: UserProfile = {
-      ...profile,
-      id: 'google_' + email.replace(/[^a-zA-Z0-9]/g, '_'),
-      email,
-      name,
-      isGuest: false,
-      authProvider: 'google',
-      lastSyncedAt: Date.now(),
-    };
-    setProfile(updatedProfile);
-
-    // Load user's persistent chat history for this specific account
-    const saved = loadSessions(false, updatedProfile.id);
-    setSessions(saved);
-    if (saved.length > 0) {
-      setActiveSessionId(saved[0].id);
-    }
-    setReviewItems(loadReviewItems(false));
-    setIsAuthModalOpen(false);
-
-    // Save and sync with cloud for this account
-    saveSessions(saved, false, updatedProfile.id);
-    syncWithCloud(updatedProfile.id, {
-      sessions: saved,
-      reviewItems: loadReviewItems(false),
-      profile: updatedProfile,
-    });
-  };
-
-  // Handler: Log In with Email
-  const handleLoginWithEmail = (email: string, name: string) => {
-    const updatedProfile: UserProfile = {
-      ...profile,
-      id: 'email_' + email.replace(/[^a-zA-Z0-9]/g, '_'),
-      email,
-      name,
-      isGuest: false,
-      authProvider: 'email',
-      lastSyncedAt: Date.now(),
-    };
-    setProfile(updatedProfile);
-
-    // Load user's persistent chat history for this specific account
-    const saved = loadSessions(false, updatedProfile.id);
-    setSessions(saved);
-    if (saved.length > 0) {
-      setActiveSessionId(saved[0].id);
-    }
-    setReviewItems(loadReviewItems(false));
-    setIsAuthModalOpen(false);
-
-    // Save and sync with cloud for this account
-    saveSessions(saved, false, updatedProfile.id);
-    syncWithCloud(updatedProfile.id, {
-      sessions: saved,
-      reviewItems: loadReviewItems(false),
-      profile: updatedProfile,
-    });
-  };
-
-  // Handler: Continue as Guest
-  const handleContinueAsGuest = () => {
-    const guestState: UserProfile = {
-      id: 'guest_' + Math.random().toString(36).substring(2, 9),
-      email: '',
-      name: 'Guest User',
-      role: 'Guest / Trial',
-      currency: profile.currency || '$',
-      isPro: false,
-      isGuest: true,
-      theme,
-      authProvider: 'guest',
-      lastSyncedAt: undefined,
-    };
-    setProfile(guestState);
-
-    // CRITICAL: Do NOT load or keep previous conversations!
-    const blankSession = createNewGuestSession();
-    setSessions([blankSession]);
-    setActiveSessionId(blankSession.id);
-    setIsAuthModalOpen(false);
-  };
-
   // Handler: Create new session
   const handleNewSession = () => {
-    const newId = (profile.isGuest ? 'guest_msg_' : 'session-') + Date.now();
+    const newId = 'session-' + Date.now();
     const newSession: ChatSession = {
       id: newId,
-      title: profile.isGuest ? 'Guest Calculation' : 'New Math Calculation',
+      title: 'New Math Problem',
       messages: [],
       assistantMode,
       defaultTeachingMode: teachingMode,
@@ -656,7 +569,6 @@ export default function App() {
         <Sidebar
           sessions={sessions}
           activeSessionId={activeSession.id}
-          isGuest={!!profile.isGuest}
           onSelectSession={(id) => {
             setActiveSessionId(id);
             setIsReviewCenterOpen(false);
@@ -667,7 +579,6 @@ export default function App() {
           onRenameSession={handleRenameSession}
           onOpenReviewCenter={() => setIsReviewCenterOpen(true)}
           onOpenSubscriptionModal={() => setIsSubscriptionOpen(true)}
-          onOpenAuth={() => setIsAuthModalOpen(true)}
           onOpenQuiz={() => setIsQuizOpen(true)}
           usage={usage}
           isOpenMobile={isMobileMenuOpen}
@@ -676,7 +587,7 @@ export default function App() {
 
         {/* Main App Container */}
         <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
-          {/* Navigation Bar with Logo, Theme Selector, and Account/Guest actions */}
+          {/* Navigation Bar with Logo, Theme Selector, and Account actions */}
           <Navbar
             assistantMode={assistantMode}
             onAssistantModeChange={setAssistantMode}
@@ -686,7 +597,6 @@ export default function App() {
             onThemeChange={handleThemeChange}
             isSyncing={isSyncing}
             onOpenAccount={() => setIsAccountOpen(true)}
-            onOpenAuth={() => setIsAuthModalOpen(true)}
             onOpenSubscription={() => setIsSubscriptionOpen(true)}
             onOpenReviewCenter={() => setIsReviewCenterOpen(!isReviewCenterOpen)}
             isReviewCenterOpen={isReviewCenterOpen}
@@ -730,8 +640,6 @@ export default function App() {
                 isLoading={isLoading}
                 usage={usage}
                 profile={profile}
-                isGuest={!!profile.isGuest}
-                onOpenAuth={() => setIsAuthModalOpen(true)}
                 onBookmarkMessage={handleBookmarkMessage}
                 onOpenReviewCenterWithCalc={() => setIsReviewCenterOpen(true)}
                 onOpenSubscriptionModal={() => setIsSubscriptionOpen(true)}
@@ -753,16 +661,6 @@ export default function App() {
           }
         />
 
-        {/* Auth Modal: Sign In / Sign Up with Gmail OR Continue as Guest */}
-        <AuthModal
-          isOpen={isAuthModalOpen}
-          onClose={() => setIsAuthModalOpen(false)}
-          onLoginWithGoogle={handleLoginWithGoogle}
-          onLoginWithEmail={handleLoginWithEmail}
-          onContinueAsGuest={handleContinueAsGuest}
-          currentProfile={profile}
-        />
-
         {/* Account Settings & Theme Modal */}
         <AccountModal
           isOpen={isAccountOpen}
@@ -775,11 +673,6 @@ export default function App() {
           onTriggerSync={handleTriggerSync}
           isSyncing={isSyncing}
           onTogglePro={handleTogglePro}
-          onOpenAuthModal={() => {
-            setIsAccountOpen(false);
-            setIsAuthModalOpen(true);
-          }}
-          onSwitchToGuest={handleContinueAsGuest}
         />
 
         {/* 24-Hour Limits & Subscription Modal */}

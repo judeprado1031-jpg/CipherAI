@@ -21,7 +21,7 @@ interface NavbarProps {
   onThemeChange: (theme: ColorTheme) => void;
   isSyncing: boolean;
   onOpenAccount: () => void;
-  onOpenAuth: () => void;
+  onOpenAuth?: () => void;
   onOpenSubscription: () => void;
   onOpenReviewCenter: () => void;
   isReviewCenterOpen: boolean;
@@ -146,21 +146,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <GraduationCap className="w-4 h-4" />
             <span>Quiz</span>
-          </button>
-        )}
-
-        {/* Guest Mode Warning / Sign in with Gmail CTA button */}
-        {profile.isGuest && (
-          <button
-            onClick={onOpenAuth}
-            className="h-9 flex items-center gap-1.5 px-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 transition-all text-xs font-semibold shadow-xs"
-            title="You are in Guest Mode (Conversations are not saved). Click to sign in with your Gmail account."
-          >
-            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-            <span className="hidden sm:inline">Guest (Unsaved)</span>
-            <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-[10px] font-bold text-amber-200">
-              Sign In
-            </span>
           </button>
         )}
 

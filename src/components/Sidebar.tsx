@@ -25,7 +25,7 @@ import {
 interface SidebarProps {
   sessions: ChatSession[];
   activeSessionId: string;
-  isGuest: boolean;
+  isGuest?: boolean;
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
   onDeleteSession: (id: string) => void;
@@ -33,7 +33,7 @@ interface SidebarProps {
   onRenameSession: (id: string, newTitle: string) => void;
   onOpenReviewCenter: () => void;
   onOpenSubscriptionModal: () => void;
-  onOpenAuth: () => void;
+  onOpenAuth?: () => void;
   usage: UserUsage;
   isOpenMobile: boolean;
   onCloseMobile: () => void;
@@ -176,35 +176,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        {/* Sessions list OR Guest Mode Notice */}
+        {/* Sessions list */}
         <div className="flex-1 overflow-y-auto px-3 py-1 space-y-4 text-xs scrollbar-thin">
-          {/* Guest Mode Callout in Sidebar */}
-          {isGuest && (
-            <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/25 space-y-2">
-              <div className="flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                <div>
-                  <div className="text-xs font-bold text-amber-300">
-                    Guest Mode Active
-                  </div>
-                  <div className="text-[11px] text-amber-200/80 leading-snug mt-0.5">
-                    Conversations are <span className="font-semibold text-amber-100 underline">not saved</span> upon closing or refreshing.
-                  </div>
-                </div>
-              </div>
-
-              <button
-                onClick={() => {
-                  onOpenAuth();
-                  if (isOpenMobile) onCloseMobile();
-                }}
-                className="w-full py-1.5 px-2.5 rounded-xl bg-white hover:bg-slate-100 text-slate-900 font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-sm"
-              >
-                <LogIn className="w-3.5 h-3.5" />
-                Sign in with Gmail to Save
-              </button>
-            </div>
-          )}
 
           {/* Pinned Sessions */}
           {pinnedSessions.length > 0 && (
