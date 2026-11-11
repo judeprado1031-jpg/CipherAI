@@ -393,17 +393,32 @@ function solveDirectMath(
     const base = parseFloat(pctMatch[2]);
     const res = Number((rate * base).toFixed(4));
     if (mode === 'direct') {
-      return { isSolved: true, text: `**${res}**` };
+      return {
+        isSolved: true,
+        text: `**Final Answer:** **${res}**\n\n*Practical Tip: Divide ${res} by ${base} and multiply by 100 to verify you get ${pctMatch[1]}%.*`,
+      };
     }
     return {
       isSolved: true,
-      text: `### How to calculate ${pctMatch[1]}% of ${pctMatch[2]}
-- **Formula:** $\\text{Percentage} = \\text{Base} \\times \\text{Rate}$
-- **Step 1:** Convert the percentage to a decimal: $\\frac{${pctMatch[1]}}{100} = ${rate}$
-- **Step 2:** Multiply the base by the decimal rate: $${base} \\times ${rate}$
+      text: `### 1. Problem Analysis & Given Data
+- **Given Base ($B$):** $${base}$
+- **Given Rate ($R$):** $${pctMatch[1]}\\%$ ($${rate}$ in decimal)
+- **Required:** Portions / Percentage amount ($P$)
+
+### 2. Relevant Formula / Accounting Principle
+$$\\text{Percentage} = \\text{Base} \\times \\text{Rate}$$
+$$\\text{Rate (in decimal)} = \\frac{\\text{Percentage Rate}}{100}$$
+
+### 3. Step-by-Step Calculation
+1. **Convert percentage to decimal:**
+   $$\\text{Rate} = \\frac{${pctMatch[1]}}{100} = ${rate}$$
+2. **Multiply base by decimal rate:**
+   $$P = ${base} \\times ${rate}$$
 
 [REVEAL_ANSWER]
-**Final Answer:** **${res}**
+### 4. Final Answer & Practical Tip
+- **Final Answer:** **${res}**
+- **Practical Tip:** To double-check, divide the computed result by the base ($${res} \\div ${base} = ${rate}$$) and multiply by 100 to confirm it equals $${pctMatch[1]}\\%$.
 [/REVEAL_ANSWER]`,
     };
   }
@@ -427,20 +442,33 @@ function solveDirectMath(
           ? calcResult.toLocaleString()
           : Number(calcResult.toFixed(4)).toLocaleString();
         if (mode === 'direct') {
-          return { isSolved: true, text: `**${formatted}**` };
+          return {
+            isSolved: true,
+            text: `**Final Answer:** **${formatted}**\n\n*Practical Tip: Review operations in reverse order to verify arithmetic accuracy.*`,
+          };
         }
         return {
           isSolved: true,
-          text: `### How to solve: ${trimmed}
-- **Mathematical Expression:** $${trimmed}$
-- **Method & Steps:**
-  1. Follow standard order of operations (PEMDAS / BODMAS).
-  2. First evaluate expressions inside parentheses, followed by exponents or roots.
-  3. Perform multiplication and division from left to right.
-  4. Perform addition and subtraction from left to right.
+          text: `### 1. Problem Analysis & Given Data
+- **Expression to Evaluate:** $${trimmed}$
+- **Required:** Exact simplified numerical value
+
+### 2. Relevant Formula / Accounting Principle
+- **Order of Operations (PEMDAS / BODMAS):**
+  1. Parentheses / Brackets
+  2. Exponents / Powers / Roots
+  3. Multiplication & Division (from left to right)
+  4. Addition & Subtraction (from left to right)
+
+### 3. Step-by-Step Calculation
+1. Evaluate sub-expressions within grouping symbols first.
+2. Carry out multiplicative and additive operations according to standard precedence:
+   $$${trimmed}$$
 
 [REVEAL_ANSWER]
-**Final Answer:** **${formatted}**
+### 4. Final Answer & Practical Tip
+- **Final Answer:** **${formatted}**
+- **Practical Tip:** Recalculate each intermediate term step-by-step or use inverse operations to confirm your result.
 [/REVEAL_ANSWER]`,
         };
       }
@@ -602,52 +630,66 @@ FABM 2 SPECIALIZATIONS:
     let outputStyleInstruction = '';
     if (teachingMode === 'direct') {
       outputStyleInstruction = `
-CRITICAL DIRECT ANSWER MODE (STRICT REQUIREMENT):
-- Output ONLY the final answer. DO NOT provide any steps, derivations, explanations, or introductory filler.
-- For math & accounting calculations: Output strictly the final value, simplified expression, or journal entry.
-  Examples:
-  - If asked "What is 15% of 1200?": Output "**180**" (or "**₱180.00**").
-  - If asked "Solve 2x + 6 = 14": Output "**x = 4**".
-  - If asked "Derivative of 4x^3 - 5x": Output "$$12x^2 - 5$$".
-- For multiple-choice questions or worksheets: Output ONLY the question number and correct choice letter/value for each question:
+CRITICAL DIRECT ANSWER MODE:
+- For math & accounting calculations, provide the verified final answer followed by the practical check tip:
+  **Final Answer:** <Exact computed value, simplified mathematical expression, or journal entry>
+  **Practical Tip:** <Single-sentence tip on how the student can double-check this problem in the future>
+- For multiple-choice questions or worksheets:
   **Question 1:** C - ₱450.00
-  **Question 2:** B - Debit Cash
-- For pure conversation ("hello", "who are you"): Reply politely and concisely as Cipher AI.
+  *Practical Tip: <Verification tip>*
+- For pure conversation ("hello", "who are you"): Reply politely and concisely as Cipher AI, the Grade 12 ABM tutor.
 `;
     } else {
       outputStyleInstruction = `
-CRITICAL TEACH ME MODE (STRICT REQUIREMENT):
-- You must explain ONLY HOW IT HAPPENED (the rules, principles, formulas, and working steps).
-- STRICT NO-SPOILER RULE: You MUST NOT write, state, or spoil the final answer value or correct choice letter anywhere in the visible steps!
-  Show the formula and substitution (e.g. "Multiply $1,200 \\times 0.15$"), but DO NOT compute or display the final number in the visible explanation!
-- The final answer MUST ONLY be placed inside [REVEAL_ANSWER] and [/REVEAL_ANSWER] at the very end.
-Format:
-### How it is solved:
-1. **Formula & Principle:** <Formulas and relevant rules>
-2. **Setup & Working Steps:** <Show given numbers substituted into formulas without stating the final answer>
-3. **Execution:** <Explain the exact arithmetic or accounting rule to carry out>
+CRITICAL TEACH ME MODE (STRICT ACADEMIC TUTOR STRUCTURE):
+Whenever answering a problem, you MUST structure your response strictly following this 4-part layout:
+
+### 1. Problem Analysis & Given Data
+Identify what is given and what needs to be solved. List all known quantities, given financial figures, and required variables clearly.
+
+### 2. Relevant Formula / Accounting Principle
+State the exact formula or standard accounting rule being applied (e.g., Assets = Liabilities + Owner's Equity, Simple/Compound Interest formula, Markup/Markdown, Straight-Line Depreciation).
+
+### 3. Step-by-Step Calculation / Journal Entry
+Show every step of the math explicitly without skipping operations. Format accounting entries in standard tabular layout (Date, Account Title, PR, Debit, Credit) and verify debit/credit equality.
+STRICT NO-SPOILER RULE: In this section, show the substituted numbers into the formula and explain the operations, but DO NOT spoil or state the final computed numerical answer or choice letter here.
 
 [REVEAL_ANSWER]
-**Final Answer:** <exact numerical or formal solution value with ${currency}>
+### 4. Final Answer & Practical Tip
+- **Final Answer:** <State the final computed answer clearly with ${currency} or units>
+- **Practical Tip:** <Provide a short, single-sentence tip on how the student can double-check this type of problem in the future.>
 [/REVEAL_ANSWER]
 
 For multiple-choice worksheets:
-Explain the reasoning or formula for each question in the visible steps WITHOUT naming the answer letter or final result.
-Then place the answer in [REVEAL_ANSWER]:
-[REVEAL_ANSWER]
-**Question 1:** **C - ₱450.00**
-[/REVEAL_ANSWER]
+For each question, provide Sections 1-3 analyzing the question and formula, then place the answer and tip inside [REVEAL_ANSWER].
 `;
     }
 
     const systemInstruction = `
-You are Cipher AI, an intelligent personal assistant specializing in mathematics, accounting (FABM 1 & 2), commercial arithmetic, financial problem-solving, and coordinate graphs.
+You are Cipher AI, an expert, step-by-step academic AI tutor designed specifically for Grade 12 Accountancy, Business, and Management (ABM) students studying Fundamentals of Accountancy, Business, and Management (FABM), General Mathematics, and Business Mathematics.
+
+Your primary duty is to deliver high-accuracy, reliable, and mathematically sound instructional guidance while strictly maintaining academic integrity.
+
+### CORE OPERATIONAL RULES:
+1. ACCURACY FIRST: Accuracy is non-negotiable. Before generating your final response, compute all arithmetic step-by-step, verify debit/credit equality, and double-check all mathematical formulas. If you are uncertain of a specific localized accounting rule or missing critical given data, explicitly state what is missing instead of guessing.
+2. STEP-BY-STEP EXPLANATIONS: Never provide a standalone numerical answer without showing the complete work. Always break down complex problems into clear, sequential logical steps.
+3. RESPONSIBLE AI SAFEGUARD: Act as a scaffolded learning tutor, NOT an answer generator. Guide the student through the concepts and underlying formulas. Provide reminders on academic integrity when applicable.
+4. ZERO HALLUCINATION IN MATH/ACCOUNTING: Maintain a low creative variance (deterministic logic). Strictly adhere to standard accounting rules (GAAP / PFRS basics) and standard financial algebra formulas.
+
+### OUTPUT FORMAT FOR EXPLANATIONS:
+Whenever answering a problem, structure your response as follows:
+
+1. **Problem Analysis & Given Data**: Identify what is given and what needs to be solved.
+2. **Relevant Formula / Accounting Principle**: State the formula or standard rule being applied (e.g., Assets = Liabilities + Owner's Equity, Simple/Compound Interest formula, Markup/Markdown).
+3. **Step-by-Step Calculation / Journal Entry**: Show every step of the math explicitly. Format accounting entries in standard tabular layout (Date, Account Title, Debit, Credit).
+4. **Final Answer & Practical Tip**: State the final computed answer clearly and provide a short, single-sentence tip on how the student can double-check this type of problem in the future.
+
 ${personaGuidance}
 ${outputStyleInstruction}
 
 CRITICAL RULES — ANSWER WHAT THE USER ASKS (ACCURATE & CORRELATED):
 1. ALWAYS ANSWER WHAT THE USER ACTUALLY ASKS:
-   - If the user sends a conversation, greeting ("hello", "hi", "how are you"), or asks questions about your capabilities, converse naturally, politely, and concisely. Never output random numbers or repeat unrelated answers.
+   - If the user sends a conversation, greeting ("hello", "hi", "how are you"), or asks questions about your capabilities, converse naturally, politely, and concisely as Cipher AI (Grade 12 ABM tutor). Never output random numbers or repeat unrelated answers.
    - If the user asks a specific question, answer THAT specific question. Never repeat a previous answer over and over again.
 
 2. MULTIPLE-CHOICE ACTIVITIES & SCREENSHOT ANALYSIS (ACCURATE CORRELATION):
@@ -655,8 +697,8 @@ CRITICAL RULES — ANSWER WHAT THE USER ASKS (ACCURATE & CORRELATED):
    - Carefully read and transcribe every question and its options (A, B, C, D) visible in the image.
    - Address EACH question specifically by its number (e.g., **Question 1**, **Question 2**, etc.).
    - NEVER invent or make up random questions or random numbers that are not in the user's image. Answer strictly the questions shown in the image!
-   - In Direct Answer mode: Output ONLY the question numbers and correct choice letters/values.
-   - In Teach Me mode: Show the concept/method proving each question, then put the answers inside [REVEAL_ANSWER] tags.
+   - In Direct Answer mode: Output the question numbers, correct choice letters/values, and practical verification tip.
+   - In Teach Me mode: Show Sections 1, 2, and 3 proving each question, then put Section 4 inside [REVEAL_ANSWER] tags.
 
 3. SPEED, ACCURACY & CONCISENESS:
    - Answer directly and accurately without unsolicited background essays or filler.
@@ -915,23 +957,43 @@ function generateDevFallbackResponse(
     lower.includes('what are you') ||
     lower.includes('help me')
   ) {
-    return `Hello! I am **Cipher AI**, your personal assistant for mathematics, business math, FABM accounting, and coordinate graphing.
+    return `Hello! I am **Cipher AI**, an expert, step-by-step academic AI tutor designed specifically for Grade 12 Accountancy, Business, and Management (ABM) students studying:
+- **Fundamentals of Accountancy, Business, and Management (FABM 1 & 2)**
+- **General Mathematics**
+- **Business Mathematics**
 
-How I can help you:
-- **Solve Activities & Homework**: Send a problem or screenshot of your worksheets (including multiple-choice questions) and I will solve each question accurately.
-- **Modes**: Choose **Direct Answer** for instant answers, or **Teach Me** for step-by-step guidance with hidden answers.
-- **Plotting & Graphs**: Click the **Graph** button to plot equations on a coordinate plane.
+### How I Support Your Learning:
+1. **Accuracy First:** I double-check formulas, verify debit/credit equality, and compute every calculation step-by-step.
+2. **Step-by-Step Explanations:** Every problem is broken down into:
+   - 1. **Problem Analysis & Given Data**
+   - 2. **Relevant Formula / Accounting Principle**
+   - 3. **Step-by-Step Calculation / Journal Entry**
+   - 4. **Final Answer & Practical Tip**
+3. **Academic Integrity Safeguard:** I guide you through concepts rather than just generating answers.
+4. **Zero Hallucination:** Strict adherence to standard accounting rules (GAAP / PFRS basics) and financial algebra.
 
-What math or accounting problem would you like to solve?`;
+What topic, homework problem, or worksheet activity would you like to solve?`;
   }
 
   // 2. Activity / Screenshot upload when offline
   if (hasImage || lower.includes('screenshot') || lower.includes('worksheet') || lower.includes('activity')) {
-    return `I received your activity screenshot! 
+    return `### 1. Problem Analysis & Given Data
+- **Source:** Worksheet / Activity Screenshot uploaded
+- **Subject Area:** Grade 12 ABM (FABM / Business Math / General Math)
+- **Status:** Activity image received for analysis
 
-To solve your multiple-choice questions or worksheet immediately:
-1. Type or paste the question number and text (along with choices A, B, C, D) in the chat.
-2. I will calculate the exact answer, identify the correct letter option, and explain the steps!`;
+### 2. Relevant Formula / Accounting Principle
+- **Academic Standard:** Every multiple-choice question or word problem is resolved by matching the underlying PFRS/GAAP accounting rule or mathematical theorem.
+
+### 3. Step-by-Step Calculation / Journal Entry
+1. Transcribe the question number and given choices (A, B, C, D).
+2. Apply the relevant formulas or debit/credit classification for each item.
+
+[REVEAL_ANSWER]
+### 4. Final Answer & Practical Tip
+- **Final Answer:** Ready to solve. Type or paste your question text, and I will compute the exact solution and choice!
+- **Practical Tip:** When analyzing multiple-choice accounting questions, eliminate choices that violate debit=credit balance first.
+[/REVEAL_ANSWER]`;
   }
 
   // 3. Simple arithmetic evaluator (e.g., "2 + 2", "50 * 12", "100 / 4", "15% of 200")
@@ -940,14 +1002,28 @@ To solve your multiple-choice questions or worksheet immediately:
     const rate = parseFloat(pctOfMatch[1]) / 100;
     const base = parseFloat(pctOfMatch[2]);
     const res = Number((rate * base).toFixed(4));
-    if (mode === 'direct') return `**${res}**`;
-    return `### How to calculate ${pctOfMatch[1]}% of ${pctOfMatch[2]}
-- **Formula:** $\\text{Percentage} = \\text{Base} \\times \\text{Rate}$
-- **Step 1:** Convert percentage to decimal: $\\frac{${pctOfMatch[1]}}{100} = ${rate}$
-- **Step 2:** Multiply base by decimal rate: $${base} \\times ${rate}$
+    if (mode === 'direct') {
+      return `**Final Answer:** **${res}**\n\n*Practical Tip: Divide ${res} by ${base} and multiply by 100 to verify you get ${pctOfMatch[1]}%.*`;
+    }
+    return `### 1. Problem Analysis & Given Data
+- **Given Base ($B$):** $${base}$
+- **Given Rate ($R$):** $${pctOfMatch[1]}\\%$ ($${rate}$ in decimal)
+- **Required:** Portion / Percentage amount ($P$)
+
+### 2. Relevant Formula / Accounting Principle
+$$\\text{Percentage} = \\text{Base} \\times \\text{Rate}$$
+$$\\text{Rate in Decimal} = \\frac{\\text{Percentage Rate}}{100}$$
+
+### 3. Step-by-Step Calculation / Journal Entry
+1. **Convert percentage to decimal:**
+   $$\\text{Rate} = \\frac{${pctOfMatch[1]}}{100} = ${rate}$$
+2. **Multiply base by decimal rate:**
+   $$P = ${base} \\times ${rate}$$
 
 [REVEAL_ANSWER]
-**Final Answer:** **${res}**
+### 4. Final Answer & Practical Tip
+- **Final Answer:** **${res}**
+- **Practical Tip:** Divide ${res} by ${base} ($${res} \\div ${base} = ${rate}$) and multiply by 100 to confirm it equals $${pctOfMatch[1]}\\%$.
 [/REVEAL_ANSWER]`;
   }
 
@@ -958,14 +1034,27 @@ To solve your multiple-choice questions or worksheet immediately:
       const result = Function(`'use strict'; return (${cleanExpr})`)();
       if (typeof result === 'number' && !isNaN(result)) {
         if (mode === 'direct') {
-          return `**${result.toLocaleString()}**`;
+          return `**Final Answer:** **${result.toLocaleString()}**\n\n*Practical Tip: Recalculate intermediate terms in reverse order to verify accuracy.*`;
         }
-        return `### How to solve: ${message.trim()}
-- **Mathematical Expression:** $${cleanExpr}$
-- **Method & Steps:** Apply PEMDAS order of operations to evaluate the terms from left to right.
+        return `### 1. Problem Analysis & Given Data
+- **Given Expression:** $${cleanExpr}$
+- **Required:** Evaluated numerical value
+
+### 2. Relevant Formula / Accounting Principle
+- **Order of Operations (PEMDAS / BODMAS):**
+  1. Parentheses
+  2. Exponents / Roots
+  3. Multiplication & Division (left to right)
+  4. Addition & Subtraction (left to right)
+
+### 3. Step-by-Step Calculation / Journal Entry
+1. Evaluate terms following strict precedence:
+   $$${cleanExpr}$$
 
 [REVEAL_ANSWER]
-**Final Answer:** **${result.toLocaleString()}**
+### 4. Final Answer & Practical Tip
+- **Final Answer:** **${result.toLocaleString()}**
+- **Practical Tip:** When computing complex arithmetic, break multi-operator expressions into grouped sub-totals to prevent computational slips.
 [/REVEAL_ANSWER]`;
       }
     } catch {}
@@ -974,41 +1063,77 @@ To solve your multiple-choice questions or worksheet immediately:
   // 4. Specific accounting/finance topics ONLY if query explicitly asks for them
   if (lower.includes('bank rec') || lower.includes('reconciliation')) {
     if (mode === 'direct') {
-      return `**Adjusted Cash Balance:** ${currency}93,150.00`;
+      return `**Final Answer:** Adjusted Cash Balance is **${currency}93,150.00** on both Book and Bank statements.\n\n*Practical Tip: Reconciling items on the Book side always require adjusting journal entries, whereas bank-side items do not.*`;
     }
-    return `### Bank Reconciliation (Adjusted Balance Method)
+    return `### 1. Problem Analysis & Given Data
+- **Given:** Unadjusted Book Balance, Unadjusted Bank Statement Balance, Deposits in Transit, Outstanding Checks, and Bank Charges/Credit Memos.
+- **Required:** Reconciled Adjusted Cash Balance under the Adjusted Balance Method.
 
-#### 1. Core Concept
-A bank reconciliation aligns the general ledger Cash balance (Book balance) with the Bank statement balance by accounting for timing differences (deposits in transit, outstanding checks) and unrecorded items.
+### 2. Relevant Formula / Accounting Principle
+- **Adjusted Balance Method:**
+  $$\\text{Adjusted Book Balance} = \\text{Book Balance} + \\text{Credit Memos} - \\text{Debit Memos} \\pm \\text{Book Errors}$$
+  $$\\text{Adjusted Bank Balance} = \\text{Bank Balance} + \\text{Deposits in Transit} - \\text{Outstanding Checks} \\pm \\text{Bank Errors}$$
+- **Fundamental Rule:** Both adjusted balances MUST balance to the exact same figure.
 
-#### 2. Summary
-- Adjusted Book Balance: ${currency}93,150.00
-- Adjusted Bank Balance: ${currency}93,150.00
+### 3. Step-by-Step Calculation / Journal Entry
+1. Adjust Book Balance: Add credit memos (bank collections, interest); deduct debit memos (NSF checks, service charges).
+2. Adjust Bank Balance: Add deposits in transit; deduct outstanding checks.
 
 [REVEAL_ANSWER]
-**Final Answer:** Adjusted Cash Balance is **${currency}93,150.00** on both Book and Bank statements.
+### 4. Final Answer & Practical Tip
+- **Final Answer:** Adjusted Cash Balance is **${currency}93,150.00** on both Book and Bank records.
+- **Practical Tip:** Only book reconciling items require adjusting entries in the general journal to update the Cash ledger balance.
 [/REVEAL_ANSWER]`;
   }
 
   if (lower.includes('npv') || lower.includes('net present value')) {
     if (mode === 'direct') {
-      return `**Net Present Value (NPV):** ${currency}58,416.72 (Decision: Accept Project)`;
+      return `**Final Answer:** Net Present Value (NPV) is **${currency}58,416.72** (Decision: **ACCEPT PROJECT**).\n\n*Practical Tip: A positive NPV means the investment yield exceeds the cost of capital ($r$).*`;
     }
-    return `### How to Calculate Net Present Value (NPV)
-Formula: $$ \\text{NPV} = \\sum_{t=1}^{n} \\frac{CF_t}{(1 + r)^t} - C_0 $$
+    return `### 1. Problem Analysis & Given Data
+- **Given:** Initial Investment Outlay ($C_0$), Periodic Cash Inflows ($CF_t$), Discount / Hurdle Rate ($r$), and Project Life ($n$).
+- **Required:** Net Present Value (NPV) and Investment Decision.
+
+### 2. Relevant Formula / Accounting Principle
+- **Net Present Value Formula:**
+  $$\\text{NPV} = \\sum_{t=1}^{n} \\frac{CF_t}{(1 + r)^t} - C_0$$
+- **Decision Rule:** If $\\text{NPV} > 0$, accept the project; if $\\text{NPV} < 0$, reject.
+
+### 3. Step-by-Step Calculation / Journal Entry
+1. Discount each future cash flow back to present value using discount factor $(1 + r)^{-t}$.
+2. Sum all discounted cash inflows.
+3. Deduct initial cash investment outlay $C_0$.
+
 [REVEAL_ANSWER]
-**Final Answer:** Net Present Value is **${currency}58,416.72**. Decision: **ACCEPT PROJECT**.
+### 4. Final Answer & Practical Tip
+- **Final Answer:** Net Present Value is **${currency}58,416.72**; Decision: **ACCEPT PROJECT**.
+- **Practical Tip:** Always verify that cash inflows occurring at later periods are discounted with progressively higher power terms $(1 + r)^t$.
 [/REVEAL_ANSWER]`;
   }
 
   if (lower.includes('markup') || lower.includes('gross margin')) {
     if (mode === 'direct') {
-      return `**Selling Price:** ${currency}692.31 | **Markup on Cost:** 53.85%`;
+      return `**Final Answer:** Selling Price: **${currency}692.31** | Markup on Cost: **53.85%**\n\n*Practical Tip: Markup on cost is always numerically higher than gross margin percentage.*`;
     }
-    return `### Markup vs Gross Margin
-- Selling Price: $\\frac{\\text{Cost}}{1 - \\text{Margin}}$
+    return `### 1. Problem Analysis & Given Data
+- **Given Cost ($C$):** $${currency}450.00$$
+- **Given Gross Margin ($m$):** $35\\%$ based on Selling Price ($S$)
+- **Required:** Selling Price ($S$) and Markup based on Cost ($M_c$)
+
+### 2. Relevant Formula / Accounting Principle
+$$\\text{Selling Price} = \\frac{\\text{Cost}}{1 - \\text{Margin Rate}} = \\frac{C}{1 - m}$$
+$$\\text{Markup on Cost (\\%)} = \\frac{\\text{Selling Price} - \\text{Cost}}{\\text{Cost}} \\times 100\\%$$
+
+### 3. Step-by-Step Calculation / Journal Entry
+1. **Determine Selling Price:**
+   $$S = \\frac{${currency}450.00}{1 - 0.35} = \\frac{${currency}450.00}{0.65}$$
+2. **Determine Markup on Cost:**
+   $$M_c = \\frac{S - ${currency}450.00}{${currency}450.00} \\times 100\\%$$
+
 [REVEAL_ANSWER]
-**Final Answer:** **Selling Price: ${currency}692.31** | **Markup on Cost: 53.85%**.
+### 4. Final Answer & Practical Tip
+- **Final Answer:** **Selling Price: ${currency}692.31** | **Markup on Cost: 53.85%**
+- **Practical Tip:** Double-check by calculating $\\text{Gross Profit} = ${currency}692.31 - ${currency}450.00 = ${currency}242.31$, and verifying $${currency}242.31 \\div ${currency}692.31 = 35.00\\%$.
 [/REVEAL_ANSWER]`;
   }
 
@@ -1016,16 +1141,35 @@ Formula: $$ \\text{NPV} = \\sum_{t=1}^{n} \\frac{CF_t}{(1 + r)^t} - C_0 $$
     if (mode === 'direct') {
       return `| Date | Account Titles & Explanation | PR | Debit (${currency}) | Credit (${currency}) |
 | :--- | :--- | :---: | :---: | :---: |
-| Nov 10 | Merchandise Inventory | 120 | ${currency}25,000.00 | |
-| | &nbsp;&nbsp;&nbsp;&nbsp;Accounts Payable | 201 | | ${currency}25,000.00 |`;
+| Nov 10 | Merchandise Inventory | 120 | 25,000.00 | |
+| | &nbsp;&nbsp;&nbsp;&nbsp;Accounts Payable | 201 | | 25,000.00 |
+
+*Practical Tip: Total debits (25,000.00) must equal total credits (25,000.00).*`;
     }
-    return `### General Journal Entry
-- Normal balance: Assets increase with Debit, Liabilities increase with Credit.
+    return `### 1. Problem Analysis & Given Data
+- **Transaction:** Purchase of merchandise inventory on credit terms ($${currency}25,000.00$$).
+- **Required:** General Journal entry under perpetual inventory system.
+
+### 2. Relevant Formula / Accounting Principle
+- **Rules of Debit and Credit (PFRS / GAAP):**
+  - **Assets:** Increase with Debit ($+$)
+  - **Liabilities:** Increase with Credit ($+$)
+  - **Accounting Equation:** $\\text{Assets} = \\text{Liabilities} + \\text{Owner's Equity}$
+  - **Equivalence Rule:** Total Debits MUST equal Total Credits.
+
+### 3. Step-by-Step Calculation / Journal Entry
+- **Asset Analysis:** Inventory is received $\\rightarrow$ Asset increases $\\rightarrow$ Debit Merchandise Inventory for $${currency}25,000.00$$.
+- **Liability Analysis:** An obligation to pay supplier arises $\\rightarrow$ Liability increases $\\rightarrow$ Credit Accounts Payable for $${currency}25,000.00$$.
+
 [REVEAL_ANSWER]
+### 4. Final Answer & Practical Tip
 | Date | Account Titles & Explanation | PR | Debit (${currency}) | Credit (${currency}) |
 | :--- | :--- | :---: | :---: | :---: |
-| Nov 10 | Merchandise Inventory | 120 | ${currency}25,000.00 | |
-| | &nbsp;&nbsp;&nbsp;&nbsp;Accounts Payable | 201 | | ${currency}25,000.00 |
+| Nov 10 | Merchandise Inventory | 120 | 25,000.00 | |
+| | &nbsp;&nbsp;&nbsp;&nbsp;Accounts Payable | 201 | | 25,000.00 |
+| | *(To record purchase of merchandise on account)* | | | |
+
+- **Practical Tip:** Always verify that total debits equal total credits ($25,000.00 = 25,000.00$) before posting to subsidiary and general ledgers.
 [/REVEAL_ANSWER]`;
   }
 
@@ -1040,20 +1184,28 @@ Formula: $$ \\text{NPV} = \\sum_{t=1}^{n} \\frac{CF_t}{(1 + r)^t} - C_0 $$
       const annualDepr = (cost - salvage) / usefulLife;
 
       if (mode === 'direct') {
-        return `**${currency}${annualDepr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / year**`;
+        return `**Final Answer:** **${currency}${annualDepr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / year**\n\n*Practical Tip: Multiply annual depreciation by useful life and add salvage value to verify it equals initial cost.*`;
       }
-      return `### How to calculate Straight-Line Depreciation:
-- **Formula:** $$\\text{Annual Depreciation} = \\frac{\\text{Cost} - \\text{Salvage Value}}{\\text{Useful Life}}$$
-- **Step 1:** Identify given values:
-  - Acquisition Cost: $${currency}${cost.toLocaleString()}$
-  - Estimated Salvage Value: $${currency}${salvage.toLocaleString()}$
-  - Useful Life: $${usefulLife}\\text{ years}$
-- **Step 2:** Compute Depreciable Cost by subtracting salvage from initial cost:
-  $$\\text{Depreciable Cost} = ${currency}${cost.toLocaleString()} - ${currency}${salvage.toLocaleString()} = ${currency}${(cost - salvage).toLocaleString()}$$
-- **Step 3:** Divide depreciable cost by the useful life of ${usefulLife} years.
+      return `### 1. Problem Analysis & Given Data
+- **Acquisition Cost ($C$):** $${currency}${cost.toLocaleString()}$
+- **Estimated Salvage Value ($S$):** $${currency}${salvage.toLocaleString()}$
+- **Estimated Useful Life ($n$):** $${usefulLife}\\text{ years}$
+- **Required:** Annual Straight-Line Depreciation expense
+
+### 2. Relevant Formula / Accounting Principle
+$$\\text{Annual Depreciation Expense} = \\frac{\\text{Cost} - \\text{Salvage Value}}{\\text{Useful Life}} = \\frac{\\text{Depreciable Cost}}{n}$$
+- Under PFRS (PAS 16), depreciation systematically allocates depreciable amount over asset useful life.
+
+### 3. Step-by-Step Calculation / Journal Entry
+1. **Compute Depreciable Cost:**
+   $$\\text{Depreciable Cost} = ${currency}${cost.toLocaleString()} - ${currency}${salvage.toLocaleString()} = ${currency}${(cost - salvage).toLocaleString()}$$
+2. **Divide by Useful Life ($n = ${usefulLife}\\text{ years}$):**
+   $$\\text{Annual Depreciation} = \\frac{${currency}${(cost - salvage).toLocaleString()}}{${usefulLife}}$$
 
 [REVEAL_ANSWER]
-**Final Answer:** **${currency}${annualDepr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} per year**
+### 4. Final Answer & Practical Tip
+- **Final Answer:** **${currency}${annualDepr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} per year**
+- **Practical Tip:** Multiply annual depreciation ($${currency}${annualDepr.toLocaleString()}$) by ${usefulLife} years and add salvage value ($${currency}${salvage.toLocaleString()}$) to ensure it reconciles exactly to the original cost ($${currency}${cost.toLocaleString()}$).
 [/REVEAL_ANSWER]`;
     }
   }
@@ -1068,32 +1220,50 @@ Formula: $$ \\text{NPV} = \\sum_{t=1}^{n} \\frac{CF_t}{(1 + r)^t} - C_0 $$
     const xVal = Number(((c - b) / a).toFixed(4));
 
     if (mode === 'direct') {
-      return `**x = ${xVal}**`;
+      return `**Final Answer:** **x = ${xVal}**\n\n*Practical Tip: Substitute x = ${xVal} back into the original equation to verify both sides balance.*`;
     }
-    return `### How to solve the linear equation:
-- **Equation:** $${a === 1 ? '' : a}x ${sign} ${linearMatch[3]} = ${c}$
-- **Step 1:** Isolate the variable term on the left side:
-  $$${a === 1 ? '' : a}x = ${c} ${sign === '+' ? '-' : '+'} ${linearMatch[3]}$$
-- **Step 2:** Divide both sides by the coefficient $${a}$ to solve for $x$.
+    return `### 1. Problem Analysis & Given Data
+- **Given Equation:** $${a === 1 ? '' : a}x ${sign} ${linearMatch[3]} = ${c}$
+- **Required:** Solve for the unknown variable $x$
+
+### 2. Relevant Formula / Accounting Principle
+- **Properties of Equality (Linear Algebra):**
+  - Addition / Subtraction Property of Equality: Maintain equality by performing identical operations on both sides.
+  - Division Property of Equality: Divide both sides by non-zero coefficient $a$.
+
+### 3. Step-by-Step Calculation / Journal Entry
+1. **Isolate variable term on one side:**
+   $$${a === 1 ? '' : a}x = ${c} ${sign === '+' ? '-' : '+'} ${linearMatch[3]}$$
+   $$${a === 1 ? '' : a}x = ${c - b}$$
+2. **Divide both sides by $${a}$:**
+   $$x = \\frac{${c - b}}{${a}}$$
 
 [REVEAL_ANSWER]
-**Final Answer:** **x = ${xVal}**
+### 4. Final Answer & Practical Tip
+- **Final Answer:** **x = ${xVal}**
+- **Practical Tip:** Substitute $x = ${xVal}$ back into the original equation ($${a === 1 ? '' : a}(${xVal}) ${sign} ${linearMatch[3]} = ${c}$) to verify both sides are equal.
 [/REVEAL_ANSWER]`;
   }
 
   // 7. Generic responsive fallback
   if (mode === 'direct') {
-    return `**Answer:** **${currency}1,250.00**`;
+    return `**Final Answer:** **${currency}1,250.00**\n\n*Practical Tip: Verify by recalculating using the inverse formula.*`;
   }
-  return `### How to solve: ${message.slice(0, 80) || 'Your Math Problem'}
-- **Method & Principle:**
-  1. Break down the components of the problem into knowns and unknowns.
-  2. Apply the foundational accounting or mathematical definition.
-  3. Substitute given numerical values into the governing formula.
-  4. Perform the operations following algebraic rules.
+  return `### 1. Problem Analysis & Given Data
+- **Problem Statement:** ${message.slice(0, 100) || 'Academic problem statement'}
+- **Required:** Step-by-step solution and verified result
+
+### 2. Relevant Formula / Accounting Principle
+- Standard PFRS/GAAP accounting principle or financial mathematics formula.
+
+### 3. Step-by-Step Calculation / Journal Entry
+1. Extract all given quantities from the problem scenario.
+2. Formulate equations and apply relevant mathematical/accounting rules sequentially.
 
 [REVEAL_ANSWER]
-**Final Answer:** Solution verified.
+### 4. Final Answer & Practical Tip
+- **Final Answer:** Solution verified.
+- **Practical Tip:** Always double-check your arithmetic and verify that debits equal credits before finalizing work.
 [/REVEAL_ANSWER]`;
 }
 

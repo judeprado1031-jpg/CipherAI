@@ -170,8 +170,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
     // 2. Secondary heuristic parsing for common headers if tags omitted
     const patterns = [
+      /\n(?=### (?:4\.\s*)?Final Answer & Practical Tip)/i,
       /\n(?=### (?:[0-9]+\.\s*)?Final (?:Answer|Conclusion))/i,
       /\n(?=#### (?:[0-9]+\.\s*)?Final (?:Answer|Conclusion))/i,
+      /\n(?=4\.\s*\*\*Final Answer)/i,
+      /\n(?=\*\*4\.\s*Final Answer)/i,
       /\n(?=\*\*Final Answer:?\*\*)/i,
       /\n(?=Final Answer:?)/i,
       /\n(?=\*\*Answer:?\*\*)/i,
@@ -412,7 +415,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
               </h3>
 
               <p className="text-xs sm:text-sm leading-relaxed opacity-80 max-w-md mx-auto">
-                Cipher AI is ready for your {ASSISTANT_MODES.find((m) => m.id === assistantMode)?.label || 'Math & Accounting'} problems. Snap a photo of your homework worksheet, paste an image, or type your equations below!
+                Cipher AI is your Grade 12 ABM academic AI tutor for FABM 1 & 2, General Mathematics, and Business Mathematics. Snap a photo of your homework worksheet, paste an image, or type your problem below!
               </p>
             </div>
           </div>
