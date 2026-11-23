@@ -29,7 +29,6 @@ interface ReviewCenterProps {
 export const ReviewCenter: React.FC<ReviewCenterProps> = ({
   items,
   onRemoveItem,
-  onUpdateItemNotes,
   currency,
   onOpenChatWithProblem,
 }) => {
@@ -66,7 +65,7 @@ export const ReviewCenter: React.FC<ReviewCenterProps> = ({
           </p>
         </div>
 
-        {/* Navigation Tabs (Practice & Quiz removed as requested) */}
+        {/* Navigation Tabs */}
         <div className={`flex flex-wrap gap-1 p-1 rounded-2xl border shrink-0 ${themeConfig.classes.bgCard} ${themeConfig.classes.border}`}>
           <button
             onClick={() => setActiveTab('saved')}

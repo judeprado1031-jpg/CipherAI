@@ -83,8 +83,6 @@ export const ChatView: React.FC<ChatViewProps> = ({
   onOpenAuth,
   onBookmarkMessage,
   onOpenSubscriptionModal,
-  currency,
-  onOpenQuiz,
   onOpenGraphModal,
 }) => {
   const { themeConfig } = useTheme();
@@ -140,6 +138,25 @@ export const ChatView: React.FC<ChatViewProps> = ({
     scrollToBottom();
   }, [session.messages, isLoading]);
 
+  // Cancel any active speech synthesis on unmount
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
+
+  // Close zoomed image lightbox on Escape
+  useEffect(() => {
+    if (!zoomImage) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setZoomImage(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [zoomImage]);
+
   // Extract user first name based on profile name (same as what displays on login button)
   const rawName = (profile?.isGuest ? 'Guest' : profile?.name) || 'Guest';
   const userFirstName = rawName.trim().split(/\s+/)[0] || 'Friend';
@@ -161,7 +178,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
       const remainder = rawContent.slice(openTagIdx + '[REVEAL_ANSWER]'.length);
       const closeTagIdx = remainder.indexOf('[/REVEAL_ANSWER]');
-      const answer = closeTagIdx !== -1 
+      const answer = closeTagIdx !== -1
         ? remainder.slice(0, closeTagIdx).trim()
         : remainder.trim();
 
@@ -259,9 +276,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     setIsDragging(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const file = e.dataTransfer.files[0];
-      if (file.type.startsWith('image/')) {
-        processImageFile(file);
-      }
+      processImageFile(file);
     }
   };
 
@@ -303,7 +318,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
   // Text-To-Speech reader
   const handleToggleSpeech = (id: string, text: string) => {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      setFileError('Audio read-aloud is not supported in this browser.');
+      setTimeout(() => setFileError(null), 3500);
+      return;
+    }
 
     if (speakingId === id) {
       window.speechSynthesis.cancel();
@@ -336,7 +355,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {/* Session Title Bar (top teach me and direct answer buttons removed as requested) */}
+      {/* Session Title Bar */}
       <div
         className={`py-3 border-b flex items-center justify-between gap-2 shrink-0 ${themeConfig.classes.border}`}
       >
@@ -586,10 +605,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   ) : (
                     /* TEACH ME MODE: Shows how it is done, with Reveal Button to show the answer */
                     <div className="space-y-4">
-                      {/* Step-by-step breakdown (how it is done) */}
                       <MathRenderer content={steps} />
 
-                      {/* Reveal Answer component */}
                       {answer && (
                         <div className="mt-4 pt-3 border-t border-dashed border-white/20">
                           {!isRevealed ? (
@@ -740,6 +757,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                 if (e.target.files && e.target.files[0]) {
                   processImageFile(e.target.files[0]);
                 }
+                e.target.value = '';
               }}
             />
             <input
@@ -752,6 +770,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                 if (e.target.files && e.target.files[0]) {
                   processImageFile(e.target.files[0]);
                 }
+                e.target.value = '';
               }}
             />
 
@@ -784,6 +803,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   onClick={() => {
                     setAttachedImage(null);
                     setAttachedFileName(null);
+                    if (fileInputRef.current) fileInputRef.current.value = '';
+                    if (cameraInputRef.current) cameraInputRef.current.value = '';
                   }}
                   className="p-1.5 rounded-xl hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 transition-colors shrink-0"
                   title="Remove attached photo"

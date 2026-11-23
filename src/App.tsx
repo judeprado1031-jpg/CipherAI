@@ -23,6 +23,7 @@ import {
   syncWithCloud,
   fetchServerUsage,
   createNewGuestSession,
+  getDeviceId,
 } from './utils/storage';
 import {
   applyThemeToDocument,
@@ -160,13 +161,31 @@ export default function App() {
     sessions[0] ||
     createNewGuestSession();
 
-  // Sync assistant mode with active session if changed
+  // Sync assistant & teaching mode with active session when switching sessions
   useEffect(() => {
     if (activeSession) {
-      setAssistantMode(activeSession.assistantMode || 'cfo');
+      setAssistantMode(activeSession.assistantMode || 'fabm');
       setTeachingMode(activeSession.defaultTeachingMode || 'teach');
     }
   }, [activeSessionId]);
+
+  const handleAssistantModeChange = (mode: AssistantMode) => {
+    setAssistantMode(mode);
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === activeSession.id ? { ...s, assistantMode: mode, updatedAt: Date.now() } : s
+      )
+    );
+  };
+
+  const handleTeachingModeChange = (mode: TeachingMode) => {
+    setTeachingMode(mode);
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === activeSession.id ? { ...s, defaultTeachingMode: mode, updatedAt: Date.now() } : s
+      )
+    );
+  };
 
   // Live timer for 24h cycle reset countdown
   useEffect(() => {
@@ -333,12 +352,23 @@ export default function App() {
       );
     };
 
+    let serverGraphImageUrl: string | undefined;
+
     try {
+      const deviceId = getDeviceId();
+      const priorHistory = activeSession.messages
+        .filter((m) => m.content && m.content.trim().length > 0)
+        .map((m) => ({
+          role: m.role,
+          text: m.content,
+        }));
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Accept: 'text/event-stream, application/json',
+          'X-Device-Id': deviceId,
         },
         body: JSON.stringify({
           stream: true,
@@ -347,18 +377,16 @@ export default function App() {
           mimeType,
           teachingMode,
           assistantMode,
-          history: updatedMessages.map((m) => ({
-            role: m.role,
-            text: m.content,
-          })),
+          history: priorHistory,
           userId: profile.id,
+          deviceId,
           currency: profile.currency,
         }),
       });
 
       if (response.status === 429) {
         const errorData = await response.json();
-        setUsage(errorData.usage);
+        if (errorData.usage) setUsage(errorData.usage);
         setIsSubscriptionOpen(true);
         setIsLoading(false);
         // Remove empty assistant placeholder
@@ -376,7 +404,12 @@ export default function App() {
       }
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        let serverErrorMessage = `HTTP error! status: ${response.status}`;
+        try {
+          const errJson = await response.json();
+          if (errJson?.message) serverErrorMessage = errJson.message;
+        } catch {}
+        throw new Error(serverErrorMessage);
       }
 
       const contentType = response.headers.get('content-type') || '';
@@ -397,48 +430,65 @@ export default function App() {
           for (const line of lines) {
             const trimmed = line.trim();
             if (!trimmed.startsWith('data:')) continue;
+            let payload: any;
             try {
-              const payload = JSON.parse(trimmed.slice(5).trim());
-              if (payload.chunk) {
-                accumulatedContent += payload.chunk;
-                updateAssistantMsg(accumulatedContent);
+              payload = JSON.parse(trimmed.slice(5).trim());
+            } catch {
+              continue;
+            }
+            if (payload.error) {
+              throw new Error(payload.error);
+            }
+            if (payload.chunk) {
+              accumulatedContent += payload.chunk;
+              updateAssistantMsg(accumulatedContent);
+            }
+            if (payload.done) {
+              if (payload.usage) setUsage(payload.usage);
+              if (payload.graphImageUrl) {
+                serverGraphImageUrl = payload.graphImageUrl;
+                updateAssistantMsg(
+                  accumulatedContent,
+                  payload.graphImageUrl,
+                  payload.teachingMode,
+                  payload.assistantMode
+                );
               }
-              if (payload.done) {
-                if (payload.usage) setUsage(payload.usage);
-                if (payload.graphImageUrl) {
-                  updateAssistantMsg(
-                    accumulatedContent,
-                    payload.graphImageUrl,
-                    payload.teachingMode,
-                    payload.assistantMode
-                  );
-                }
-              }
-            } catch {}
+            }
           }
         }
       } else {
         const data = await response.json();
+        if (data.error) {
+          throw new Error(data.message || data.error);
+        }
         accumulatedContent = data.text || '';
+        serverGraphImageUrl = data.graphImageUrl;
         updateAssistantMsg(accumulatedContent, data.graphImageUrl, data.teachingMode, data.assistantMode);
         if (data.usage) {
           setUsage(data.usage);
         }
       }
 
-      // Check client-side graph fallback if graph query and no image attached yet
+      if (!accumulatedContent.trim()) {
+        throw new Error('Cipher did not receive a response from the AI service. Please try again.');
+      }
+
+      // Check client-side graph fallback ONLY if not a raster photo upload and server didn't return a graph
+      const isSvgUpload = Boolean(image && image.startsWith('data:image/svg'));
+      const isRasterUpload = Boolean(image && !isSvgUpload);
       const lowerPrompt = messagePrompt.toLowerCase();
       const isGraphingQuery =
-        assistantMode === 'graphs' ||
-        lowerPrompt.includes('graph') ||
-        lowerPrompt.includes('plot') ||
-        lowerPrompt.includes('parabola') ||
-        lowerPrompt.includes('curve') ||
-        (image && image.startsWith('data:image/svg'));
+        !isRasterUpload &&
+        !serverGraphImageUrl &&
+        (isSvgUpload ||
+          assistantMode === 'graphs' ||
+          /\b(graph|plot)\b/.test(lowerPrompt) ||
+          lowerPrompt.includes('parabola'));
 
       if (isGraphingQuery) {
         try {
-          const svgGraph = (image && image.startsWith('data:image/svg'))
+          const svgGraph = isSvgUpload
             ? image
             : generateGraphData(messagePrompt).svgDataUrl;
           updateAssistantMsg(accumulatedContent, svgGraph);
@@ -478,6 +528,22 @@ export default function App() {
   // Handler: Bookmark message to Review Center
   const handleBookmarkMessage = (message: Message) => {
     const existing = reviewItems.find((r) => r.id === message.id);
+    const nextBookmarked = !existing;
+
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === activeSession.id
+          ? {
+              ...s,
+              messages: s.messages.map((m) =>
+                m.id === message.id ? { ...m, bookmarked: nextBookmarked } : m
+              ),
+              updatedAt: Date.now(),
+            }
+          : s
+      )
+    );
+
     if (existing) {
       setReviewItems(reviewItems.filter((r) => r.id !== message.id));
       return;
@@ -542,11 +608,21 @@ export default function App() {
     }));
 
     try {
-      await fetch('/api/user/subscription', {
+      const deviceId = getDeviceId();
+      const res = await fetch('/api/user/subscription', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: profile.id, isPro }),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Device-Id': deviceId,
+        },
+        body: JSON.stringify({ userId: profile.id, deviceId, isPro }),
       });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.usage) {
+          setUsage(data.usage);
+        }
+      }
     } catch (e) {
       console.error('Pro subscription toggle failed:', e);
     }
@@ -590,7 +666,7 @@ export default function App() {
           {/* Navigation Bar with Logo, Theme Selector, and Account actions */}
           <Navbar
             assistantMode={assistantMode}
-            onAssistantModeChange={setAssistantMode}
+            onAssistantModeChange={handleAssistantModeChange}
             usage={usage}
             profile={profile}
             currentTheme={theme}
@@ -633,9 +709,9 @@ export default function App() {
               <ChatView
                 session={activeSession}
                 teachingMode={teachingMode}
-                onTeachingModeChange={setTeachingMode}
+                onTeachingModeChange={handleTeachingModeChange}
                 assistantMode={assistantMode}
-                onAssistantModeChange={setAssistantMode}
+                onAssistantModeChange={handleAssistantModeChange}
                 onSendMessage={handleSendMessage}
                 isLoading={isLoading}
                 usage={usage}

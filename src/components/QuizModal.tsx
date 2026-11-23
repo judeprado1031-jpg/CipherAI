@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { AssistantMode, GeneratedQuiz, QuizQuestion, ReviewItem } from '../types';
 import { useTheme } from '../utils/themeConfig';
 import { MathRenderer } from './MathRenderer';
@@ -106,6 +106,15 @@ export const QuizModal: React.FC<QuizModalProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   // Handle PDF file selection
@@ -147,7 +156,12 @@ export const QuizModal: React.FC<QuizModalProps> = ({
       });
 
       if (!response.ok) {
-        throw new Error(`Server returned error ${response.status}`);
+        let serverMsg = `Server returned error ${response.status}`;
+        try {
+          const errData = await response.json();
+          if (errData?.message) serverMsg = errData.message;
+        } catch {}
+        throw new Error(serverMsg);
       }
 
       const data: GeneratedQuiz = await response.json();
@@ -318,6 +332,7 @@ export const QuizModal: React.FC<QuizModalProps> = ({
                     if (e.target.files && e.target.files[0]) {
                       handlePdfSelected(e.target.files[0]);
                     }
+                    e.target.value = '';
                   }}
                 />
 
@@ -347,6 +362,7 @@ export const QuizModal: React.FC<QuizModalProps> = ({
                         setPdfFile(null);
                         setPdfDataUrl(null);
                         setPdfFileName(null);
+                        if (fileInputRef.current) fileInputRef.current.value = '';
                       }}
                       className="p-1.5 rounded-lg hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 transition-colors shrink-0"
                       title="Remove PDF"

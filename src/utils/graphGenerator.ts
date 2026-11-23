@@ -234,21 +234,64 @@ export function generateGraphData(rawEquation: string): GraphData {
     };
   }
 
-  // 4. Inverted Parabola: -0.5x^2 + 2x + 4 or -x^2
-  if (eq.includes('-0.5x^2') || eq.includes('-x^2') || eq.includes('- x^2') || eq.includes('inverted')) {
-    const a = eq.includes('-0.5') ? -0.5 : -1;
-    const b = eq.includes('-0.5') ? 2 : 2;
-    const c = eq.includes('-0.5') ? 4 : 3;
+  // 4. Quadratic Parabola (supports f(x) = ax^2 + bx + c, y = -x^2 + 4, -0.5x^2 + 2x + 4, etc.)
+  if (eq.includes('x^2') || eq.includes('x²') || eq.includes('parabola') || eq.includes('inverted')) {
+    let a = 1;
+    let b = -4;
+    let c = 3;
+
+    if (eq.includes('-0.5x^2') || eq.includes('-0.5x²')) {
+      a = -0.5;
+      b = 2;
+      c = 4;
+    } else if (eq.includes('inverted') && !eq.includes('x^2') && !eq.includes('x²')) {
+      a = -1;
+      b = 2;
+      c = 3;
+    }
+
+    const cleanedEq = eq
+      .replace(/x²/g, 'x^2')
+      .replace(/^.*=\s*/, '')
+      .replace(/\s+/g, '');
+
+    // Parse full quadratic expression: optional a*x^2, optional b*x, optional c
+    const quadFullMatch = cleanedEq.match(
+      /^([+-]?\d*(?:\.\d+)?)x\^2(?:([+-]\d*(?:\.\d+)?)x(?!\^))?([+-]\d+(?:\.\d+)?)?$/
+    );
+    const quadPartialMatch = !quadFullMatch
+      ? cleanedEq.match(/([+-]?\d*(?:\.\d+)?)x\^2(?:([+-]\d*(?:\.\d+)?)x(?!\^))?([+-]\d+(?:\.\d+)?)?/)
+      : null;
+    const match = quadFullMatch || quadPartialMatch;
+
+    if (match) {
+      const aStr = match[1];
+      a = aStr === '-' ? -1 : aStr === '' || aStr === '+' ? 1 : parseFloat(aStr);
+      if (!Number.isFinite(a) || a === 0) a = 1;
+
+      const bStr = match[2];
+      if (bStr !== undefined && bStr !== '') {
+        b = bStr === '-' ? -1 : bStr === '+' ? 1 : parseFloat(bStr) || 0;
+      } else {
+        b = 0;
+      }
+
+      const cStr = match[3];
+      c = cStr !== undefined && cStr !== '' ? parseFloat(cStr) || 0 : 0;
+    }
 
     const h = -b / (2 * a);
     const k = a * h * h + b * h + c;
     const disc = b * b - 4 * a * c;
-    const roots = disc >= 0 ? [(-b - Math.sqrt(disc)) / (2 * a), (-b + Math.sqrt(disc)) / (2 * a)].sort((x, y) => x - y) : [];
+    const roots =
+      disc >= 0
+        ? [(-b - Math.sqrt(disc)) / (2 * a), (-b + Math.sqrt(disc)) / (2 * a)].sort((x, y) => x - y)
+        : [];
 
-    const xMin = -4;
-    const xMax = 6;
-    const yMin = -4;
-    const yMax = k + 3;
+    const xMin = Math.min(-4, Math.floor(h - 5));
+    const xMax = Math.max(6, Math.ceil(h + 5));
+    const yLo = a > 0 ? Math.min(-4, Math.floor(k - 3)) : Math.min(-6, Math.floor(k - 10));
+    const yHi = a < 0 ? Math.max(5, Math.ceil(k + 3)) : Math.max(8, Math.ceil(k + 10));
 
     const fn = (x: number) => a * x * x + b * x + c;
     const keyPoints = [
@@ -257,15 +300,20 @@ export function generateGraphData(rawEquation: string): GraphData {
       ...roots.map((r) => ({ label: `Root (${r.toFixed(1)}, 0)`, x: r, y: 0, color: '#34D399' })),
     ];
 
-    const formulaStr = `${a === -1 ? '-' : a}x² + ${b}x + ${c}`;
+    const aLabel = a === 1 ? '' : a === -1 ? '-' : `${a}`;
+    const bLabel = b === 0 ? '' : b > 0 ? ` + ${b === 1 ? '' : b}x` : ` - ${Math.abs(b) === 1 ? '' : Math.abs(b)}x`;
+    const cLabel = c === 0 ? '' : c > 0 ? ` + ${c}` : ` - ${Math.abs(c)}`;
+    const formulaStr = `${aLabel}x²${bLabel}${cLabel}`;
+    const curveColor = a < 0 ? '#EC4899' : '#F59E0B';
+
     const svg = renderSvgGraph({
       title: `Quadratic Parabola: f(x) = ${formulaStr}`,
       equation: `f(x) = ${formulaStr}`,
       xMin,
       xMax,
-      yMin,
-      yMax,
-      curves: [{ label: `f(x) = ${formulaStr}`, color: '#EC4899', fn }],
+      yMin: yLo,
+      yMax: yHi,
+      curves: [{ label: `f(x) = ${formulaStr}`, color: curveColor, fn }],
       keyPoints,
       xLabel: 'x',
       yLabel: 'y',
@@ -281,15 +329,15 @@ export function generateGraphData(rawEquation: string): GraphData {
       yIntercept: c,
       xMin,
       xMax,
-      yMin,
-      yMax,
+      yMin: yLo,
+      yMax: yHi,
       keyPoints,
       svgDataUrl: svg,
     };
   }
 
-  // 5. Linear Equation: y = mx + b
-  const linearMatch = eq.match(/y\s*=\s*(-?\d*(?:\.\d+)?)\s*x\s*([+-]\s*\d+(?:\.\d+)?)?/);
+  // 5. Linear Equation: y = mx + b or f(x) = mx + b
+  const linearMatch = eq.match(/(?:y|f\s*\(\s*x\s*\))\s*=\s*(-?\d*(?:\.\d+)?)\s*x\s*([+-]\s*\d+(?:\.\d+)?)?/);
   if (linearMatch || eq.includes('2x - 1') || eq.includes('linear')) {
     let m = 2;
     let b = -1;
@@ -419,6 +467,15 @@ interface SvgRenderOptions {
   yLabel?: string;
 }
 
+function escapeXml(value: string): string {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 /**
  * Builds a clean, publication-quality SVG string and encodes it as a Data URL
  */
@@ -511,7 +568,7 @@ export function renderSvgGraph(opts: SvgRenderOptions): string {
         <circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="6" fill="${col}" stroke="#0F172A" stroke-width="2" />
         <circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="10" fill="none" stroke="${col}" stroke-width="1" opacity="0.4" />
         <rect x="${(sx + 10).toFixed(1)}" y="${(sy - 18).toFixed(1)}" width="${pt.label.length * 6.5 + 10}" height="18" rx="4" fill="#0B0F19" stroke="${col}" stroke-width="1" opacity="0.9" />
-        <text x="${(sx + 15).toFixed(1)}" y="${(sy - 5).toFixed(1)}" fill="#F8FAFC" font-size="10" font-weight="bold" font-family="system-ui, sans-serif">${pt.label}</text>
+        <text x="${(sx + 15).toFixed(1)}" y="${(sy - 5).toFixed(1)}" fill="#F8FAFC" font-size="10" font-weight="bold" font-family="system-ui, sans-serif">${escapeXml(pt.label)}</text>
       </g>
     `;
   });
@@ -551,12 +608,12 @@ export function renderSvgGraph(opts: SvgRenderOptions): string {
   <g transform="translate(24, 20)">
     <rect width="${plotW + padLeft - 20}" height="32" rx="8" fill="#1E293B" opacity="0.4" />
     <circle cx="16" cy="16" r="6" fill="#F59E0B" />
-    <text x="30" y="20" fill="#F8FAFC" font-size="13" font-weight="bold" font-family="system-ui, sans-serif">${opts.title}</text>
+    <text x="30" y="20" fill="#F8FAFC" font-size="13" font-weight="bold" font-family="system-ui, sans-serif">${escapeXml(opts.title)}</text>
   </g>
 
   <!-- Axis Labels -->
-  <text x="${padLeft + plotW - 10}" y="${padTop + plotH - 8}" fill="#94A3B8" font-size="11" font-weight="bold" font-family="system-ui, sans-serif" text-anchor="end">${opts.xLabel || 'x-axis'}</text>
-  <text x="${padLeft + 14}" y="${padTop + 20}" fill="#94A3B8" font-size="11" font-weight="bold" font-family="system-ui, sans-serif">${opts.yLabel || 'y-axis'}</text>
+  <text x="${padLeft + plotW - 10}" y="${padTop + plotH - 8}" fill="#94A3B8" font-size="11" font-weight="bold" font-family="system-ui, sans-serif" text-anchor="end">${escapeXml(opts.xLabel || 'x-axis')}</text>
+  <text x="${padLeft + 14}" y="${padTop + 20}" fill="#94A3B8" font-size="11" font-weight="bold" font-family="system-ui, sans-serif">${escapeXml(opts.yLabel || 'y-axis')}</text>
 
   <!-- Bottom Brand Watermark -->
   <text x="${width - padRight}" y="${height - 15}" fill="#475569" font-size="10" font-weight="bold" font-family="monospace" text-anchor="end">CIPHER AI • COORDINATE GRAPH</text>

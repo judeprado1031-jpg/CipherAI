@@ -4,21 +4,14 @@ import { ASSISTANT_MODES } from './AssistantModeSelector';
 import { CipherLogo } from './CipherLogo';
 import { useTheme } from '../utils/themeConfig';
 import {
-  MessageSquare,
   Plus,
   Pin,
   Trash2,
   Edit2,
-  Bookmark,
-  Calculator,
   Search,
   Zap,
   Clock,
   Sparkles,
-  ChevronRight,
-  ShieldAlert,
-  AlertTriangle,
-  LogIn,
   GraduationCap,
 } from 'lucide-react';
 
@@ -49,9 +42,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onDeleteSession,
   onPinSession,
   onRenameSession,
-  onOpenReviewCenter,
   onOpenSubscriptionModal,
-  onOpenAuth,
   usage,
   isOpenMobile,
   onCloseMobile,
@@ -178,7 +169,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Sessions list */}
         <div className="flex-1 overflow-y-auto px-3 py-1 space-y-4 text-xs scrollbar-thin">
-
           {/* Pinned Sessions */}
           {pinnedSessions.length > 0 && (
             <div>
@@ -309,8 +299,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Action icons */}
-        <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity">
+        <div className="sm:opacity-0 sm:group-hover:opacity-100 group-focus-within:opacity-100 flex items-center gap-1 transition-opacity">
           <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation();
               onPinSession(s.id);
@@ -321,6 +312,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <Pin className="w-3 h-3" />
           </button>
           <button
+            type="button"
             onClick={(e) => startRename(s, e)}
             className="p-1 rounded hover:opacity-80"
             title="Rename"
@@ -328,6 +320,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <Edit2 className="w-3 h-3" />
           </button>
           <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation();
               onDeleteSession(s.id);

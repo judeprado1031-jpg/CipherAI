@@ -1,6 +1,6 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -28,6 +28,31 @@ const ai = apiKey
       },
     })
   : null;
+
+function extractGeminiErrorMessage(err: any): string {
+  let msg = err?.message || String(err || 'AI service request failed');
+  for (let i = 0; i < 3; i++) {
+    try {
+      const parsed = JSON.parse(msg);
+      if (parsed?.error?.message) {
+        msg = parsed.error.message;
+        continue;
+      }
+      if (parsed?.message) {
+        msg = parsed.message;
+        continue;
+      }
+    } catch {
+      break;
+    }
+  }
+  return msg.trim();
+}
+
+function isTransientGeminiError(err: any): boolean {
+  const raw = `${err?.status || ''} ${err?.code || ''} ${err?.message || ''}`;
+  return /503|UNAVAILABLE|Service Unavailable|high demand|ECONNRESET|ETIMEDOUT|fetch failed/i.test(raw);
+}
 
 // In-memory persistent sync database for cross-device synchronization and rate-limiting
 interface UserRecord {
@@ -377,17 +402,20 @@ app.get('/api/sync/:userId', (req, res) => {
   }
 });
 
-// Instant math calculation helper for ultra-fast (0ms) solutions
+// Instant math calculation helper for ultra-fast (0ms) solutions on pure arithmetic
 function solveDirectMath(
   message: string,
   mode: string,
-  currency: string
+  _currency: string
 ): { isSolved: boolean; text: string } {
   const trimmed = (message || '').trim();
   const lower = trimmed.toLowerCase();
 
-  // Percentage pattern: "15% of 500" or "what is 20% of 250"
-  const pctMatch = lower.match(/(?:what\s+is\s+|calculate\s+)?([0-9\.]+)\s*%\s*(?:of)\s*([0-9\.]+)/);
+  // Anchored percentage pattern ONLY when entire prompt is a pure percentage query:
+  // e.g. "15% of 500" or "what is 20% of 250?"
+  const pctMatch = lower.match(
+    /^(?:what\s+is\s+|calculate\s+|solve\s+)?([0-9]+(?:\.[0-9]+)?)\s*%\s+of\s+([0-9]+(?:\.[0-9]+)?)\s*\??$/
+  );
   if (pctMatch) {
     const rate = parseFloat(pctMatch[1]) / 100;
     const base = parseFloat(pctMatch[2]);
@@ -395,7 +423,7 @@ function solveDirectMath(
     if (mode === 'direct') {
       return {
         isSolved: true,
-        text: `**Final Answer:** **${res}**\n\n*Practical Tip: Divide ${res} by ${base} and multiply by 100 to verify you get ${pctMatch[1]}%.*`,
+        text: `**Final Answer:** **${res}**`,
       };
     }
     return {
@@ -403,7 +431,7 @@ function solveDirectMath(
       text: `### 1. Problem Analysis & Given Data
 - **Given Base ($B$):** $${base}$
 - **Given Rate ($R$):** $${pctMatch[1]}\\%$ ($${rate}$ in decimal)
-- **Required:** Portions / Percentage amount ($P$)
+- **Required:** Portion / Percentage amount ($P$)
 
 ### 2. Relevant Formula / Accounting Principle
 $$\\text{Percentage} = \\text{Base} \\times \\text{Rate}$$
@@ -418,23 +446,23 @@ $$\\text{Rate (in decimal)} = \\frac{\\text{Percentage Rate}}{100}$$
 [REVEAL_ANSWER]
 ### 4. Final Answer & Practical Tip
 - **Final Answer:** **${res}**
-- **Practical Tip:** To double-check, divide the computed result by the base ($${res} \\div ${base} = ${rate}$$) and multiply by 100 to confirm it equals $${pctMatch[1]}\\%$.
+- **Practical Tip:** To double-check, divide the computed result by the base ($${res} \\div ${base} = ${rate}$) and multiply by 100 to confirm it equals $${pctMatch[1]}\\%$.
 [/REVEAL_ANSWER]`,
     };
   }
 
-  // Pure arithmetic: e.g. "25 * 4", "100 / 4 + 15", "sqrt(144)", "(15 + 3) * 8"
+  // Pure arithmetic ONLY: e.g. "25 * 4", "100 / 4 + 15", "(15 + 3) * 8"
   let mathStr = lower
-    .replace(/^what\s+is\s+/, '')
-    .replace(/^calculate\s+/, '')
-    .replace(/^solve\s+/, '')
-    .replace(/x/g, '*')
+    .replace(/^(?:what\s+is\s+|calculate\s+|solve\s+)/, '')
+    .replace(/\?$/, '')
     .replace(/×/g, '*')
     .replace(/÷/g, '/')
+    .replace(/\s+x\s+/g, ' * ')
+    .replace(/(?<=\d)x(?=\d)/g, '*')
     .replace(/\^/g, '**')
     .trim();
 
-  if (/^[0-9\+\-\*\/\(\)\.\s\*\*\*]+$/.test(mathStr) && /[0-9]/.test(mathStr)) {
+  if (/^[0-9\+\-\*\/\(\)\.\s]+$/.test(mathStr) && /[0-9]/.test(mathStr) && /[\+\-\*\/]/.test(mathStr)) {
     try {
       const calcResult = Function(`'use strict'; return (${mathStr})`)();
       if (typeof calcResult === 'number' && !isNaN(calcResult) && isFinite(calcResult)) {
@@ -444,7 +472,7 @@ $$\\text{Rate (in decimal)} = \\frac{\\text{Percentage Rate}}{100}$$
         if (mode === 'direct') {
           return {
             isSolved: true,
-            text: `**Final Answer:** **${formatted}**\n\n*Practical Tip: Review operations in reverse order to verify arithmetic accuracy.*`,
+            text: `**Final Answer:** **${formatted}**`,
           };
         }
         return {
@@ -631,13 +659,12 @@ FABM 2 SPECIALIZATIONS:
     if (teachingMode === 'direct') {
       outputStyleInstruction = `
 CRITICAL DIRECT ANSWER MODE:
-- For math & accounting calculations, provide the verified final answer followed by the practical check tip:
-  **Final Answer:** <Exact computed value, simplified mathematical expression, or journal entry>
-  **Practical Tip:** <Single-sentence tip on how the student can double-check this problem in the future>
+- Output ONLY the final answer directly, concisely, and accurately without showing the long step-by-step breakdown.
+- For math & accounting calculations, state ONLY the final computed value (or exact final journal entry / table if specifically asked for an entry):
+  **Final Answer:** <Exact computed value, simplified expression, or final journal entry>
 - For multiple-choice questions or worksheets:
-  **Question 1:** C - ₱450.00
-  *Practical Tip: <Verification tip>*
-- For pure conversation ("hello", "who are you"): Reply politely and concisely as Cipher AI, the Grade 12 ABM tutor.
+  List each question number shown in the user's image/prompt and its verified final choice letter and value ONLY (e.g., **Question 1:** C — ₱450.00).
+- For conceptual or conversational questions ("what is FIFO?", "hello", "who are you"): Answer directly and concisely in 2-5 sentences (no invented numbers).
 `;
     } else {
       outputStyleInstruction = `
@@ -713,13 +740,23 @@ CRITICAL RULES — ANSWER WHAT THE USER ASKS (ACCURATE & CORRELATED):
       // Build conversation contents
       const formattedContents: any[] = [];
 
-      // Add recent history if present (up to last 6 turns)
+      // Add recent non-empty history turns (excluding duplicate trailing prompt)
       if (Array.isArray(history) && history.length > 0) {
-        const recent = history.slice(-6);
-        for (const item of recent) {
+        const recent = history
+          .filter((item: any) => typeof (item?.text ?? item?.content) === 'string' && (item?.text ?? item?.content).trim().length > 0)
+          .slice(-6);
+        for (let i = 0; i < recent.length; i++) {
+          const item = recent[i];
+          const text = (item.text || item.content || '').trim();
+          const isLastDuplicateUser =
+            i === recent.length - 1 &&
+            item.role === 'user' &&
+            message &&
+            text === message.trim();
+          if (isLastDuplicateUser) continue;
           formattedContents.push({
             role: item.role === 'assistant' || item.role === 'model' ? 'model' : 'user',
-            parts: [{ text: item.text || item.content || '' }],
+            parts: [{ text }],
           });
         }
       }
@@ -782,19 +819,17 @@ CRITICAL RULES — ANSWER WHAT THE USER ASKS (ACCURATE & CORRELATED):
         parts: userParts,
       });
 
-      // Precompute graph image if graph mode or graphing keywords requested
+      // Precompute graph image ONLY if in graphs mode, explicit SVG graph sent, or text-only graph/plot request
       let graphImageUrl: string | undefined = undefined;
       const lowerMsg = (message || '').toLowerCase();
+      const isSvgUpload = Boolean(image && typeof image === 'string' && image.startsWith('data:image/svg'));
       const isGraphQuery =
+        isSvgUpload ||
         assistantMode === 'graphs' ||
-        lowerMsg.includes('graph') ||
-        lowerMsg.includes('plot') ||
-        lowerMsg.includes('parabola') ||
-        lowerMsg.includes('curve') ||
-        (image && typeof image === 'string' && image.startsWith('data:image/svg'));
+        (!image && (/\b(graph|plot)\b/.test(lowerMsg) || lowerMsg.includes('parabola')));
 
       if (isGraphQuery) {
-        if (image && typeof image === 'string' && image.startsWith('data:image/svg')) {
+        if (isSvgUpload && typeof image === 'string') {
           graphImageUrl = image;
         } else {
           try {
@@ -814,54 +849,82 @@ CRITICAL RULES — ANSWER WHAT THE USER ASKS (ACCURATE & CORRELATED):
       }
 
       let streamSucceeded = false;
+      let lastError: any = null;
+      const modelErrors: string[] = [];
 
-      // Try streaming with gemini-3.8-flash (or fast fallback to gemini-3.1-flash-lite)
-      const primaryModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
+      // Primary: gemini-4-hydrogen (fast & accurate Gemini 4 Flash), fallback: gemini-3.1-flash-lite
+      const primaryModels = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
       for (const mName of primaryModels) {
         if (streamSucceeded) break;
-        try {
-          const streamPromise = ai.models.generateContentStream({
-            model: mName,
-            contents: formattedContents,
-            config: {
+        const maxAttempts = 2;
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          if (streamSucceeded) break;
+          generatedText = '';
+          let sentAnyChunk = false;
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+            const streamConfig: any = {
               systemInstruction,
-              temperature: teachingMode === 'direct' ? 0.0 : 0.1,
-              maxOutputTokens: teachingMode === 'direct' ? 400 : 2500,
-            },
-          });
-
-          const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error(`Model ${mName} generation timed out`)), 5000)
-          );
-
-          const responseStream = await Promise.race([streamPromise, timeoutPromise]);
-
-          for await (const chunk of responseStream) {
-            const chunkText = chunk.text || '';
-            if (chunkText) {
-              generatedText += chunkText;
-              if (wantsStream) {
-                res.write(`data: ${JSON.stringify({ chunk: chunkText })}\n\n`);
-              }
+              abortSignal: controller.signal,
+            };
+            if (mName === 'gemini-4-hydrogen') {
+              streamConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
             }
-          }
 
-          if (generatedText.trim()) {
-            streamSucceeded = true;
-            break;
+            const responseStream = await ai.models.generateContentStream({
+              model: mName,
+              contents: formattedContents,
+              config: streamConfig,
+            });
+
+            try {
+              for await (const chunk of responseStream) {
+                const chunkText = chunk.text || '';
+                if (chunkText) {
+                  generatedText += chunkText;
+                  sentAnyChunk = true;
+                  if (wantsStream) {
+                    res.write(`data: ${JSON.stringify({ chunk: chunkText })}\n\n`);
+                  }
+                }
+              }
+            } finally {
+              clearTimeout(timeoutId);
+            }
+
+            if (generatedText.trim()) {
+              streamSucceeded = true;
+              break;
+            }
+          } catch (streamErr: any) {
+            lastError = streamErr;
+            const cleanErr = extractGeminiErrorMessage(streamErr);
+            modelErrors.push(`${mName}#${attempt + 1}: ${cleanErr}`);
+            console.warn(`Stream with ${mName} (attempt ${attempt + 1}) failed:`, cleanErr);
+            if (sentAnyChunk || !isTransientGeminiError(streamErr) || attempt >= maxAttempts - 1) {
+              break;
+            }
+            await new Promise((r) => setTimeout(r, 1200 * (attempt + 1)));
           }
-        } catch (streamErr: any) {
-          console.warn(`Stream with ${mName} failed:`, streamErr?.message || streamErr);
         }
       }
 
-      // If stream failed, fallback to local solver
-      if (!streamSucceeded) {
-        console.warn('Activating rapid intelligent fallback solver...');
-        generatedText = generateDevFallbackResponse(message, teachingMode, assistantMode, currency, !!image);
+      if (!streamSucceeded || !generatedText.trim()) {
+        const cleanMsg = lastError
+          ? extractGeminiErrorMessage(lastError)
+          : 'Cipher AI could not generate a response from Gemini. Please try again.';
+        console.error('All Gemini chat models failed:', modelErrors.join(' | '));
         if (wantsStream) {
-          res.write(`data: ${JSON.stringify({ chunk: generatedText })}\n\n`);
+          res.write(`data: ${JSON.stringify({ error: cleanMsg, details: modelErrors })}\n\n`);
+          return res.end();
         }
+        return res.status(502).json({
+          error: 'AI_GENERATION_FAILED',
+          message: cleanMsg,
+          details: modelErrors,
+        });
       }
 
       recordQueryUsage(user, resolvedDeviceId, clientIp);
@@ -890,35 +953,19 @@ CRITICAL RULES — ANSWER WHAT THE USER ASKS (ACCURATE & CORRELATED):
         });
       }
     } else {
-      // Offline fallback when GEMINI_API_KEY is not configured
-      generatedText = generateDevFallbackResponse(message, teachingMode, assistantMode, currency, !!image);
-      recordQueryUsage(user, resolvedDeviceId, clientIp);
-      const updatedUsage = getEffectiveUsage(user, resolvedDeviceId, clientIp);
-
+      const missingKeyMsg =
+        'Gemini API key is not configured on the server. Please configure GEMINI_API_KEY in Settings > Secrets.';
       if (wantsStream) {
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
-        res.write(`data: ${JSON.stringify({ chunk: generatedText })}\n\n`);
-        res.write(
-          `data: ${JSON.stringify({
-            done: true,
-            usage: updatedUsage,
-            teachingMode,
-            assistantMode,
-            timestamp: Date.now(),
-          })}\n\n`
-        );
+        res.write(`data: ${JSON.stringify({ error: missingKeyMsg })}\n\n`);
         return res.end();
-      } else {
-        return res.json({
-          text: generatedText,
-          teachingMode,
-          assistantMode,
-          usage: updatedUsage,
-          timestamp: Date.now(),
-        });
       }
+      return res.status(503).json({
+        error: 'MISSING_API_KEY',
+        message: missingKeyMsg,
+      });
     }
   } catch (err: any) {
     console.error('Chat error:', err);
@@ -933,340 +980,6 @@ CRITICAL RULES — ANSWER WHAT THE USER ASKS (ACCURATE & CORRELATED):
   }
 });
 
-// Fallback solver for offline/edge cases
-function generateDevFallbackResponse(
-  message: string,
-  mode: string,
-  assistantMode: string,
-  currency: string,
-  hasImage: boolean = false
-): string {
-  const lower = (message || '').toLowerCase().trim();
-
-  // 1. Conversational greetings and inquiries
-  if (
-    lower === 'hi' ||
-    lower === 'hello' ||
-    lower === 'hey' ||
-    lower.startsWith('hi ') ||
-    lower.startsWith('hello ') ||
-    lower.startsWith('hey ') ||
-    lower.includes('who are you') ||
-    lower.includes('how are you') ||
-    lower.includes('what can you do') ||
-    lower.includes('what are you') ||
-    lower.includes('help me')
-  ) {
-    return `Hello! I am **Cipher AI**, an expert, step-by-step academic AI tutor designed specifically for Grade 12 Accountancy, Business, and Management (ABM) students studying:
-- **Fundamentals of Accountancy, Business, and Management (FABM 1 & 2)**
-- **General Mathematics**
-- **Business Mathematics**
-
-### How I Support Your Learning:
-1. **Accuracy First:** I double-check formulas, verify debit/credit equality, and compute every calculation step-by-step.
-2. **Step-by-Step Explanations:** Every problem is broken down into:
-   - 1. **Problem Analysis & Given Data**
-   - 2. **Relevant Formula / Accounting Principle**
-   - 3. **Step-by-Step Calculation / Journal Entry**
-   - 4. **Final Answer & Practical Tip**
-3. **Academic Integrity Safeguard:** I guide you through concepts rather than just generating answers.
-4. **Zero Hallucination:** Strict adherence to standard accounting rules (GAAP / PFRS basics) and financial algebra.
-
-What topic, homework problem, or worksheet activity would you like to solve?`;
-  }
-
-  // 2. Activity / Screenshot upload when offline
-  if (hasImage || lower.includes('screenshot') || lower.includes('worksheet') || lower.includes('activity')) {
-    return `### 1. Problem Analysis & Given Data
-- **Source:** Worksheet / Activity Screenshot uploaded
-- **Subject Area:** Grade 12 ABM (FABM / Business Math / General Math)
-- **Status:** Activity image received for analysis
-
-### 2. Relevant Formula / Accounting Principle
-- **Academic Standard:** Every multiple-choice question or word problem is resolved by matching the underlying PFRS/GAAP accounting rule or mathematical theorem.
-
-### 3. Step-by-Step Calculation / Journal Entry
-1. Transcribe the question number and given choices (A, B, C, D).
-2. Apply the relevant formulas or debit/credit classification for each item.
-
-[REVEAL_ANSWER]
-### 4. Final Answer & Practical Tip
-- **Final Answer:** Ready to solve. Type or paste your question text, and I will compute the exact solution and choice!
-- **Practical Tip:** When analyzing multiple-choice accounting questions, eliminate choices that violate debit=credit balance first.
-[/REVEAL_ANSWER]`;
-  }
-
-  // 3. Simple arithmetic evaluator (e.g., "2 + 2", "50 * 12", "100 / 4", "15% of 200")
-  const pctOfMatch = lower.match(/^([0-9\.]+)\s*%\s*(?:of)\s*([0-9\.]+)$/);
-  if (pctOfMatch) {
-    const rate = parseFloat(pctOfMatch[1]) / 100;
-    const base = parseFloat(pctOfMatch[2]);
-    const res = Number((rate * base).toFixed(4));
-    if (mode === 'direct') {
-      return `**Final Answer:** **${res}**\n\n*Practical Tip: Divide ${res} by ${base} and multiply by 100 to verify you get ${pctOfMatch[1]}%.*`;
-    }
-    return `### 1. Problem Analysis & Given Data
-- **Given Base ($B$):** $${base}$
-- **Given Rate ($R$):** $${pctOfMatch[1]}\\%$ ($${rate}$ in decimal)
-- **Required:** Portion / Percentage amount ($P$)
-
-### 2. Relevant Formula / Accounting Principle
-$$\\text{Percentage} = \\text{Base} \\times \\text{Rate}$$
-$$\\text{Rate in Decimal} = \\frac{\\text{Percentage Rate}}{100}$$
-
-### 3. Step-by-Step Calculation / Journal Entry
-1. **Convert percentage to decimal:**
-   $$\\text{Rate} = \\frac{${pctOfMatch[1]}}{100} = ${rate}$$
-2. **Multiply base by decimal rate:**
-   $$P = ${base} \\times ${rate}$$
-
-[REVEAL_ANSWER]
-### 4. Final Answer & Practical Tip
-- **Final Answer:** **${res}**
-- **Practical Tip:** Divide ${res} by ${base} ($${res} \\div ${base} = ${rate}$) and multiply by 100 to confirm it equals $${pctOfMatch[1]}\\%$.
-[/REVEAL_ANSWER]`;
-  }
-
-  const cleanExpr = lower.replace(/\s+/g, '').replace(/x/g, '*');
-  if (/^[0-9\+\-\*\/\(\)\.]+$/.test(cleanExpr)) {
-    try {
-      // eslint-disable-next-line no-eval
-      const result = Function(`'use strict'; return (${cleanExpr})`)();
-      if (typeof result === 'number' && !isNaN(result)) {
-        if (mode === 'direct') {
-          return `**Final Answer:** **${result.toLocaleString()}**\n\n*Practical Tip: Recalculate intermediate terms in reverse order to verify accuracy.*`;
-        }
-        return `### 1. Problem Analysis & Given Data
-- **Given Expression:** $${cleanExpr}$
-- **Required:** Evaluated numerical value
-
-### 2. Relevant Formula / Accounting Principle
-- **Order of Operations (PEMDAS / BODMAS):**
-  1. Parentheses
-  2. Exponents / Roots
-  3. Multiplication & Division (left to right)
-  4. Addition & Subtraction (left to right)
-
-### 3. Step-by-Step Calculation / Journal Entry
-1. Evaluate terms following strict precedence:
-   $$${cleanExpr}$$
-
-[REVEAL_ANSWER]
-### 4. Final Answer & Practical Tip
-- **Final Answer:** **${result.toLocaleString()}**
-- **Practical Tip:** When computing complex arithmetic, break multi-operator expressions into grouped sub-totals to prevent computational slips.
-[/REVEAL_ANSWER]`;
-      }
-    } catch {}
-  }
-
-  // 4. Specific accounting/finance topics ONLY if query explicitly asks for them
-  if (lower.includes('bank rec') || lower.includes('reconciliation')) {
-    if (mode === 'direct') {
-      return `**Final Answer:** Adjusted Cash Balance is **${currency}93,150.00** on both Book and Bank statements.\n\n*Practical Tip: Reconciling items on the Book side always require adjusting journal entries, whereas bank-side items do not.*`;
-    }
-    return `### 1. Problem Analysis & Given Data
-- **Given:** Unadjusted Book Balance, Unadjusted Bank Statement Balance, Deposits in Transit, Outstanding Checks, and Bank Charges/Credit Memos.
-- **Required:** Reconciled Adjusted Cash Balance under the Adjusted Balance Method.
-
-### 2. Relevant Formula / Accounting Principle
-- **Adjusted Balance Method:**
-  $$\\text{Adjusted Book Balance} = \\text{Book Balance} + \\text{Credit Memos} - \\text{Debit Memos} \\pm \\text{Book Errors}$$
-  $$\\text{Adjusted Bank Balance} = \\text{Bank Balance} + \\text{Deposits in Transit} - \\text{Outstanding Checks} \\pm \\text{Bank Errors}$$
-- **Fundamental Rule:** Both adjusted balances MUST balance to the exact same figure.
-
-### 3. Step-by-Step Calculation / Journal Entry
-1. Adjust Book Balance: Add credit memos (bank collections, interest); deduct debit memos (NSF checks, service charges).
-2. Adjust Bank Balance: Add deposits in transit; deduct outstanding checks.
-
-[REVEAL_ANSWER]
-### 4. Final Answer & Practical Tip
-- **Final Answer:** Adjusted Cash Balance is **${currency}93,150.00** on both Book and Bank records.
-- **Practical Tip:** Only book reconciling items require adjusting entries in the general journal to update the Cash ledger balance.
-[/REVEAL_ANSWER]`;
-  }
-
-  if (lower.includes('npv') || lower.includes('net present value')) {
-    if (mode === 'direct') {
-      return `**Final Answer:** Net Present Value (NPV) is **${currency}58,416.72** (Decision: **ACCEPT PROJECT**).\n\n*Practical Tip: A positive NPV means the investment yield exceeds the cost of capital ($r$).*`;
-    }
-    return `### 1. Problem Analysis & Given Data
-- **Given:** Initial Investment Outlay ($C_0$), Periodic Cash Inflows ($CF_t$), Discount / Hurdle Rate ($r$), and Project Life ($n$).
-- **Required:** Net Present Value (NPV) and Investment Decision.
-
-### 2. Relevant Formula / Accounting Principle
-- **Net Present Value Formula:**
-  $$\\text{NPV} = \\sum_{t=1}^{n} \\frac{CF_t}{(1 + r)^t} - C_0$$
-- **Decision Rule:** If $\\text{NPV} > 0$, accept the project; if $\\text{NPV} < 0$, reject.
-
-### 3. Step-by-Step Calculation / Journal Entry
-1. Discount each future cash flow back to present value using discount factor $(1 + r)^{-t}$.
-2. Sum all discounted cash inflows.
-3. Deduct initial cash investment outlay $C_0$.
-
-[REVEAL_ANSWER]
-### 4. Final Answer & Practical Tip
-- **Final Answer:** Net Present Value is **${currency}58,416.72**; Decision: **ACCEPT PROJECT**.
-- **Practical Tip:** Always verify that cash inflows occurring at later periods are discounted with progressively higher power terms $(1 + r)^t$.
-[/REVEAL_ANSWER]`;
-  }
-
-  if (lower.includes('markup') || lower.includes('gross margin')) {
-    if (mode === 'direct') {
-      return `**Final Answer:** Selling Price: **${currency}692.31** | Markup on Cost: **53.85%**\n\n*Practical Tip: Markup on cost is always numerically higher than gross margin percentage.*`;
-    }
-    return `### 1. Problem Analysis & Given Data
-- **Given Cost ($C$):** $${currency}450.00$$
-- **Given Gross Margin ($m$):** $35\\%$ based on Selling Price ($S$)
-- **Required:** Selling Price ($S$) and Markup based on Cost ($M_c$)
-
-### 2. Relevant Formula / Accounting Principle
-$$\\text{Selling Price} = \\frac{\\text{Cost}}{1 - \\text{Margin Rate}} = \\frac{C}{1 - m}$$
-$$\\text{Markup on Cost (\\%)} = \\frac{\\text{Selling Price} - \\text{Cost}}{\\text{Cost}} \\times 100\\%$$
-
-### 3. Step-by-Step Calculation / Journal Entry
-1. **Determine Selling Price:**
-   $$S = \\frac{${currency}450.00}{1 - 0.35} = \\frac{${currency}450.00}{0.65}$$
-2. **Determine Markup on Cost:**
-   $$M_c = \\frac{S - ${currency}450.00}{${currency}450.00} \\times 100\\%$$
-
-[REVEAL_ANSWER]
-### 4. Final Answer & Practical Tip
-- **Final Answer:** **Selling Price: ${currency}692.31** | **Markup on Cost: 53.85%**
-- **Practical Tip:** Double-check by calculating $\\text{Gross Profit} = ${currency}692.31 - ${currency}450.00 = ${currency}242.31$, and verifying $${currency}242.31 \\div ${currency}692.31 = 35.00\\%$.
-[/REVEAL_ANSWER]`;
-  }
-
-  if (lower.includes('journal') || (lower.includes('debit') && lower.includes('credit'))) {
-    if (mode === 'direct') {
-      return `| Date | Account Titles & Explanation | PR | Debit (${currency}) | Credit (${currency}) |
-| :--- | :--- | :---: | :---: | :---: |
-| Nov 10 | Merchandise Inventory | 120 | 25,000.00 | |
-| | &nbsp;&nbsp;&nbsp;&nbsp;Accounts Payable | 201 | | 25,000.00 |
-
-*Practical Tip: Total debits (25,000.00) must equal total credits (25,000.00).*`;
-    }
-    return `### 1. Problem Analysis & Given Data
-- **Transaction:** Purchase of merchandise inventory on credit terms ($${currency}25,000.00$$).
-- **Required:** General Journal entry under perpetual inventory system.
-
-### 2. Relevant Formula / Accounting Principle
-- **Rules of Debit and Credit (PFRS / GAAP):**
-  - **Assets:** Increase with Debit ($+$)
-  - **Liabilities:** Increase with Credit ($+$)
-  - **Accounting Equation:** $\\text{Assets} = \\text{Liabilities} + \\text{Owner's Equity}$
-  - **Equivalence Rule:** Total Debits MUST equal Total Credits.
-
-### 3. Step-by-Step Calculation / Journal Entry
-- **Asset Analysis:** Inventory is received $\\rightarrow$ Asset increases $\\rightarrow$ Debit Merchandise Inventory for $${currency}25,000.00$$.
-- **Liability Analysis:** An obligation to pay supplier arises $\\rightarrow$ Liability increases $\\rightarrow$ Credit Accounts Payable for $${currency}25,000.00$$.
-
-[REVEAL_ANSWER]
-### 4. Final Answer & Practical Tip
-| Date | Account Titles & Explanation | PR | Debit (${currency}) | Credit (${currency}) |
-| :--- | :--- | :---: | :---: | :---: |
-| Nov 10 | Merchandise Inventory | 120 | 25,000.00 | |
-| | &nbsp;&nbsp;&nbsp;&nbsp;Accounts Payable | 201 | | 25,000.00 |
-| | *(To record purchase of merchandise on account)* | | | |
-
-- **Practical Tip:** Always verify that total debits equal total credits ($25,000.00 = 25,000.00$) before posting to subsidiary and general ledgers.
-[/REVEAL_ANSWER]`;
-  }
-
-  // 5. Straight-Line Depreciation Solver
-  if (lower.includes('depreciat') || (lower.includes('useful life') && lower.includes('salvage'))) {
-    const rawNumbers = (message.replace(/,/g, '').match(/\d+(?:\.\d+)?/g) || []).map(Number);
-    if (rawNumbers.length >= 2) {
-      const cost = Math.max(...rawNumbers);
-      const usefulLife = rawNumbers.find((n) => n <= 50 && n >= 1 && n !== cost) || 5;
-      const salvageCandidates = rawNumbers.filter((n) => n !== cost && n !== usefulLife);
-      const salvage = salvageCandidates.length > 0 ? salvageCandidates[0] : 0;
-      const annualDepr = (cost - salvage) / usefulLife;
-
-      if (mode === 'direct') {
-        return `**Final Answer:** **${currency}${annualDepr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / year**\n\n*Practical Tip: Multiply annual depreciation by useful life and add salvage value to verify it equals initial cost.*`;
-      }
-      return `### 1. Problem Analysis & Given Data
-- **Acquisition Cost ($C$):** $${currency}${cost.toLocaleString()}$
-- **Estimated Salvage Value ($S$):** $${currency}${salvage.toLocaleString()}$
-- **Estimated Useful Life ($n$):** $${usefulLife}\\text{ years}$
-- **Required:** Annual Straight-Line Depreciation expense
-
-### 2. Relevant Formula / Accounting Principle
-$$\\text{Annual Depreciation Expense} = \\frac{\\text{Cost} - \\text{Salvage Value}}{\\text{Useful Life}} = \\frac{\\text{Depreciable Cost}}{n}$$
-- Under PFRS (PAS 16), depreciation systematically allocates depreciable amount over asset useful life.
-
-### 3. Step-by-Step Calculation / Journal Entry
-1. **Compute Depreciable Cost:**
-   $$\\text{Depreciable Cost} = ${currency}${cost.toLocaleString()} - ${currency}${salvage.toLocaleString()} = ${currency}${(cost - salvage).toLocaleString()}$$
-2. **Divide by Useful Life ($n = ${usefulLife}\\text{ years}$):**
-   $$\\text{Annual Depreciation} = \\frac{${currency}${(cost - salvage).toLocaleString()}}{${usefulLife}}$$
-
-[REVEAL_ANSWER]
-### 4. Final Answer & Practical Tip
-- **Final Answer:** **${currency}${annualDepr.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} per year**
-- **Practical Tip:** Multiply annual depreciation ($${currency}${annualDepr.toLocaleString()}$) by ${usefulLife} years and add salvage value ($${currency}${salvage.toLocaleString()}$) to ensure it reconciles exactly to the original cost ($${currency}${cost.toLocaleString()}$).
-[/REVEAL_ANSWER]`;
-    }
-  }
-
-  // 6. Linear Equation Solver (e.g. "2x + 6 = 14", "3x - 9 = 0")
-  const linearMatch = lower.match(/([0-9\.]*)\s*x\s*([\+\-])\s*([0-9\.]+)\s*=\s*([0-9\.\-]+)/i);
-  if (linearMatch) {
-    const a = parseFloat(linearMatch[1] || '1');
-    const sign = linearMatch[2];
-    const b = parseFloat(linearMatch[3]) * (sign === '-' ? -1 : 1);
-    const c = parseFloat(linearMatch[4]);
-    const xVal = Number(((c - b) / a).toFixed(4));
-
-    if (mode === 'direct') {
-      return `**Final Answer:** **x = ${xVal}**\n\n*Practical Tip: Substitute x = ${xVal} back into the original equation to verify both sides balance.*`;
-    }
-    return `### 1. Problem Analysis & Given Data
-- **Given Equation:** $${a === 1 ? '' : a}x ${sign} ${linearMatch[3]} = ${c}$
-- **Required:** Solve for the unknown variable $x$
-
-### 2. Relevant Formula / Accounting Principle
-- **Properties of Equality (Linear Algebra):**
-  - Addition / Subtraction Property of Equality: Maintain equality by performing identical operations on both sides.
-  - Division Property of Equality: Divide both sides by non-zero coefficient $a$.
-
-### 3. Step-by-Step Calculation / Journal Entry
-1. **Isolate variable term on one side:**
-   $$${a === 1 ? '' : a}x = ${c} ${sign === '+' ? '-' : '+'} ${linearMatch[3]}$$
-   $$${a === 1 ? '' : a}x = ${c - b}$$
-2. **Divide both sides by $${a}$:**
-   $$x = \\frac{${c - b}}{${a}}$$
-
-[REVEAL_ANSWER]
-### 4. Final Answer & Practical Tip
-- **Final Answer:** **x = ${xVal}**
-- **Practical Tip:** Substitute $x = ${xVal}$ back into the original equation ($${a === 1 ? '' : a}(${xVal}) ${sign} ${linearMatch[3]} = ${c}$) to verify both sides are equal.
-[/REVEAL_ANSWER]`;
-  }
-
-  // 7. Generic responsive fallback
-  if (mode === 'direct') {
-    return `**Final Answer:** **${currency}1,250.00**\n\n*Practical Tip: Verify by recalculating using the inverse formula.*`;
-  }
-  return `### 1. Problem Analysis & Given Data
-- **Problem Statement:** ${message.slice(0, 100) || 'Academic problem statement'}
-- **Required:** Step-by-step solution and verified result
-
-### 2. Relevant Formula / Accounting Principle
-- Standard PFRS/GAAP accounting principle or financial mathematics formula.
-
-### 3. Step-by-Step Calculation / Journal Entry
-1. Extract all given quantities from the problem scenario.
-2. Formulate equations and apply relevant mathematical/accounting rules sequentially.
-
-[REVEAL_ANSWER]
-### 4. Final Answer & Practical Tip
-- **Final Answer:** Solution verified.
-- **Practical Tip:** Always double-check your arithmetic and verify that debits equal credits before finalizing work.
-[/REVEAL_ANSWER]`;
-}
-
 // Interactive Quiz / Practice generator endpoint
 app.post('/api/quiz/generate', async (req, res) => {
   try {
@@ -1279,354 +992,192 @@ app.post('/api/quiz/generate', async (req, res) => {
       assistantMode = 'fabm',
     } = req.body;
 
+    if (!ai) {
+      return res.status(503).json({
+        error: 'MISSING_API_KEY',
+        message: 'Gemini API key is not configured on the server. Please configure GEMINI_API_KEY in Settings > Secrets.',
+      });
+    }
+
     const count = Math.min(25, Math.max(1, Number(questionCount) || 5));
+    const userParts: any[] = [];
 
-    if (ai) {
-      const userParts: any[] = [];
-
-      if (pdfData) {
-        let base64Pdf = pdfData;
-        let mime = 'application/pdf';
-        if (typeof pdfData === 'string' && pdfData.startsWith('data:')) {
-          const match = pdfData.match(/^data:([^;]+);base64,(.+)$/);
-          if (match) {
-            mime = match[1];
-            base64Pdf = match[2];
-          }
+    if (pdfData) {
+      let base64Pdf = pdfData;
+      let mime = 'application/pdf';
+      if (typeof pdfData === 'string' && pdfData.startsWith('data:')) {
+        const match = pdfData.match(/^data:([^;]+);base64,(.+)$/);
+        if (match) {
+          mime = match[1];
+          base64Pdf = match[2];
         }
-        userParts.push({
-          inlineData: {
-            data: base64Pdf,
-            mimeType: mime,
-          },
-        });
-        userParts.push({
-          text: `You are Cipher AI, an expert educational exam creator and tutor in Mathematics and FABM Accounting.
+      }
+      userParts.push({
+        inlineData: {
+          data: base64Pdf,
+          mimeType: mime,
+        },
+      });
+      userParts.push({
+        text: `You are Cipher AI, an expert Grade 12 ABM educational exam creator and tutor in Mathematics and FABM Accounting.
 Analyze this attached PDF document (${pdfFileName || 'Course Document'}).
-Extract the core accounting, mathematics, or business concepts from this document and generate exactly ${count} high-quality, comprehensive multiple-choice quiz questions based strictly on the material in this PDF.
+Extract the core accounting, mathematics, or business concepts from this document and generate exactly ${count} high-quality, mathematically accurate multiple-choice quiz questions based strictly on the material in this PDF.
 Difficulty level: ${difficulty}.
 Mode/Specialization: ${assistantMode}.
 Topic focus: ${topic || 'Cover key topics from the document'}.
-
-CRITICAL REQUIREMENTS:
-- Output strictly valid JSON matching this schema:
-{
-  "title": "Quiz Title based on document",
-  "topic": "${topic || pdfFileName || 'Course Document'}",
-  "difficulty": "${difficulty}",
-  "questionCount": ${count},
-  "questions": [
-    {
-      "id": "q1",
-      "title": "Descriptive Problem Title",
-      "topic": "Specific Subtopic",
-      "difficulty": "${difficulty}",
-      "problemStatement": "Detailed scenario with clear numbers and question",
-      "options": ["Option A", "Option B", "Option C", "Option D"],
-      "correctIndex": 0,
-      "explanation": "Detailed step-by-step mathematical or accounting solution showing why the answer is correct and why other choices are incorrect",
-      "formulaUsed": "$$ Formula in LaTeX $$"
-    }
-  ]
-}
-Make sure exactly 4 options are provided per question and correctIndex is an integer between 0 and 3. Ensure mathematical and accounting precision.`,
-        });
-      } else {
-        userParts.push({
-          text: `You are Cipher AI, an expert exam creator and tutor in Mathematics and FABM Accounting.
-Generate exactly ${count} high-quality multiple choice quiz questions on the topic: "${topic}".
+Make sure each question has exactly 4 distinct options, correctIndex is an integer between 0 and 3 matching the right option, formulaUsed is valid LaTeX (e.g. "$$ I = Prt $$"), and explanation shows the verified step-by-step computation.`,
+      });
+    } else {
+      userParts.push({
+        text: `You are Cipher AI, an expert Grade 12 ABM exam creator and tutor in Mathematics and FABM Accounting.
+Generate exactly ${count} high-quality, mathematically verified multiple-choice quiz questions strictly about the topic: "${topic}".
 Specialization / Mode: ${assistantMode}.
 Difficulty level: ${difficulty}.
-
-CRITICAL REQUIREMENTS:
-- Output strictly valid JSON matching this schema:
-{
-  "title": "Quiz on ${topic}",
-  "topic": "${topic}",
-  "difficulty": "${difficulty}",
-  "questionCount": ${count},
-  "questions": [
-    {
-      "id": "q1",
-      "title": "Descriptive Problem Title",
-      "topic": "Specific Subtopic",
-      "difficulty": "${difficulty}",
-      "problemStatement": "Detailed problem statement with numbers and scenario",
-      "options": ["Option A", "Option B", "Option C", "Option D"],
-      "correctIndex": 0,
-      "explanation": "Detailed step-by-step mathematical or accounting solution explaining the exact derivation",
-      "formulaUsed": "$$ Formula in LaTeX $$"
+Make sure each question is directly about "${topic}", has exactly 4 distinct options, correctIndex is an integer between 0 and 3 matching the verified correct option, formulaUsed is valid LaTeX (e.g. "$$ I = Prt $$"), and explanation proves the calculation step-by-step.`,
+      });
     }
-  ]
-}
-Ensure exactly 4 options are provided per question and correctIndex is an integer between 0 and 3.`,
-        });
-      }
 
-      try {
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('AI_TIMEOUT')), 12000)
-        );
+    const quizResponseSchema = {
+      type: Type.OBJECT,
+      properties: {
+        title: { type: Type.STRING },
+        topic: { type: Type.STRING },
+        difficulty: { type: Type.STRING },
+        questionCount: { type: Type.INTEGER },
+        questions: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              id: { type: Type.STRING },
+              title: { type: Type.STRING },
+              topic: { type: Type.STRING },
+              difficulty: { type: Type.STRING },
+              problemStatement: { type: Type.STRING },
+              options: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+              },
+              correctIndex: { type: Type.INTEGER },
+              explanation: { type: Type.STRING },
+              formulaUsed: { type: Type.STRING },
+            },
+            required: [
+              'id',
+              'title',
+              'topic',
+              'difficulty',
+              'problemStatement',
+              'options',
+              'correctIndex',
+              'explanation',
+              'formulaUsed',
+            ],
+          },
+        },
+      },
+      required: ['title', 'topic', 'difficulty', 'questionCount', 'questions'],
+    };
 
-        const quizModels = ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
-        let rawText = '';
+    const quizModels = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
+    let rawText = '';
+    let lastQuizErr: any = null;
+    const quizErrors: string[] = [];
 
-        for (const qModel of quizModels) {
+    for (const qModel of quizModels) {
+      if (rawText) break;
+      const maxAttempts = 2;
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), pdfData ? 45000 : 35000);
+          let response: any;
           try {
-            const response: any = await Promise.race([
-              ai.models.generateContent({
-                model: qModel,
-                contents: [{ role: 'user', parts: userParts }],
-                config: {
-                  responseMimeType: 'application/json',
-                  temperature: 0.2,
-                },
-              }),
-              timeoutPromise,
-            ]);
-            if (response?.text) {
-              rawText = response.text;
-              break;
+            const quizConfig: any = {
+              responseMimeType: 'application/json',
+              responseSchema: quizResponseSchema,
+              abortSignal: controller.signal,
+            };
+            if (qModel === 'gemini-4-hydrogen') {
+              quizConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
             }
-          } catch (e: any) {
-            console.warn(`Quiz model ${qModel} failed:`, e?.message || e);
+            response = await ai.models.generateContent({
+              model: qModel,
+              contents: [{ role: 'user', parts: userParts }],
+              config: quizConfig,
+            });
+          } finally {
+            clearTimeout(timeoutId);
           }
-        }
 
-        const parsed = JSON.parse(rawText || '{}');
-        if (parsed.questions && Array.isArray(parsed.questions) && parsed.questions.length > 0) {
-          return res.json({
-            id: 'quiz_' + Date.now(),
-            title: parsed.title || `Quiz on ${topic}`,
-            topic: parsed.topic || topic,
-            sourceType: pdfData ? 'pdf' : 'topic',
-            fileName: pdfFileName || undefined,
-            questionCount: parsed.questions.length,
-            difficulty,
-            questions: parsed.questions.map((q: any, idx: number) => ({
-              id: q.id || `q_${idx + 1}`,
-              title: q.title || `Question ${idx + 1}`,
-              topic: q.topic || topic,
-              difficulty: q.difficulty || difficulty,
-              problemStatement: q.problemStatement || q.question || 'Solve this problem:',
-              options:
-                Array.isArray(q.options) && q.options.length >= 4
-                  ? q.options.slice(0, 4)
-                  : ['Choice A', 'Choice B', 'Choice C', 'Choice D'],
-              correctIndex:
-                typeof q.correctIndex === 'number' && q.correctIndex >= 0 && q.correctIndex < 4
-                  ? q.correctIndex
-                  : 0,
-              explanation: q.explanation || 'Step-by-step solution calculated.',
-              formulaUsed: q.formulaUsed || '',
-            })),
-            createdAt: Date.now(),
-          });
+          if (response?.text) {
+            rawText = response.text;
+            break;
+          }
+        } catch (e: any) {
+          lastQuizErr = e;
+          const cleanErr = extractGeminiErrorMessage(e);
+          quizErrors.push(`${qModel}#${attempt + 1}: ${cleanErr}`);
+          console.warn(`Quiz model ${qModel} (attempt ${attempt + 1}) failed:`, cleanErr);
+          if (!isTransientGeminiError(e) || attempt >= maxAttempts - 1) {
+            break;
+          }
+          await new Promise((r) => setTimeout(r, 1200 * (attempt + 1)));
         }
-      } catch (geminiErr: any) {
-        console.warn('Gemini quiz generation error, using curriculum fallback:', geminiErr?.message);
       }
     }
 
-    // High-quality fallback quiz generator
-    const fallbackQuiz = generateCurriculumFallbackQuiz(topic, count, difficulty, assistantMode, pdfFileName);
-    res.json(fallbackQuiz);
+    if (!rawText) {
+      const cleanQuizErr = lastQuizErr
+        ? extractGeminiErrorMessage(lastQuizErr)
+        : 'Could not generate quiz questions from Gemini. Please try again.';
+      return res.status(502).json({
+        error: 'QUIZ_GENERATION_FAILED',
+        message: cleanQuizErr,
+        details: quizErrors,
+      });
+    }
+
+    const parsed = JSON.parse(rawText);
+    if (!parsed.questions || !Array.isArray(parsed.questions) || parsed.questions.length === 0) {
+      return res.status(502).json({
+        error: 'QUIZ_INVALID_RESPONSE',
+        message: 'Quiz model returned empty question set. Please retry.',
+      });
+    }
+
+    return res.json({
+      id: 'quiz_' + Date.now(),
+      title: parsed.title || `Quiz on ${topic}`,
+      topic: parsed.topic || topic,
+      sourceType: pdfData ? 'pdf' : 'topic',
+      fileName: pdfFileName || undefined,
+      questionCount: parsed.questions.length,
+      difficulty,
+      questions: parsed.questions.map((q: any, idx: number) => ({
+        id: q.id || `q_${idx + 1}`,
+        title: q.title || `Question ${idx + 1}`,
+        topic: q.topic || topic,
+        difficulty: q.difficulty || difficulty,
+        problemStatement: q.problemStatement || q.question || 'Solve this problem:',
+        options:
+          Array.isArray(q.options) && q.options.length >= 4
+            ? q.options.slice(0, 4)
+            : ['Choice A', 'Choice B', 'Choice C', 'Choice D'],
+        correctIndex:
+          typeof q.correctIndex === 'number' && q.correctIndex >= 0 && q.correctIndex < 4
+            ? q.correctIndex
+            : 0,
+        explanation: q.explanation || 'Step-by-step solution calculated.',
+        formulaUsed: q.formulaUsed || '',
+      })),
+      createdAt: Date.now(),
+    });
   } catch (err: any) {
     console.error('Quiz error:', err);
-    res.status(500).json({ error: err.message || 'Failed to generate quiz' });
+    res.status(500).json({ error: 'QUIZ_SERVER_ERROR', message: err.message || 'Failed to generate quiz' });
   }
 });
-
-function generateCurriculumFallbackQuiz(
-  topic: string,
-  count: number,
-  difficulty: string,
-  assistantMode: string,
-  pdfFileName?: string
-) {
-  const isAccounting =
-    assistantMode === 'fabm' ||
-    topic.toLowerCase().includes('fabm') ||
-    topic.toLowerCase().includes('accounting') ||
-    topic.toLowerCase().includes('journal') ||
-    topic.toLowerCase().includes('debit');
-
-  const questionPool = [
-    {
-      title: 'Supplies Expense Adjusting Entry',
-      topic: 'FABM Accounting - Adjusting Entries',
-      difficulty: 'Intermediate',
-      problemStatement:
-        'On January 1, 2024, Orion Trading had supplies on hand worth ₱12,000. During the year, supplies purchased totaled ₱38,000 and were debited to Supplies. An end-of-year inventory physical count reveals supplies remaining on December 31 are ₱9,500. What is the necessary adjusting entry?',
-      options: [
-        'Debit Supplies Expense ₱40,500; Credit Supplies ₱40,500',
-        'Debit Supplies ₱40,500; Credit Supplies Expense ₱40,500',
-        'Debit Supplies Expense ₱9,500; Credit Supplies ₱9,500',
-        'Debit Supplies Expense ₱28,500; Credit Supplies ₱28,500',
-      ],
-      correctIndex: 0,
-      explanation:
-        'Total Supplies Available = Beginning (₱12,000) + Purchases (₱38,000) = ₱50,000. Supplies Used = Available (₱50,000) - Ending Physical Count (₱9,500) = ₱40,500. Under the asset method, Supplies Expense is debited for ₱40,500 and Supplies is credited for ₱40,500.',
-      formulaUsed:
-        '$$ \\text{Supplies Expense} = \\text{Beginning Balance} + \\text{Purchases} - \\text{Ending Inventory} = ₱50,000 - ₱9,500 = ₱40,500 $$',
-    },
-    {
-      title: 'Bank Reconciliation Adjusted Balance',
-      topic: 'FABM Accounting - Bank Reconciliation',
-      difficulty: 'Intermediate',
-      problemStatement:
-        'As of May 31, a company book balance of Cash is ₱145,000 while the bank statement balance shows ₱162,000. Deposits in transit are ₱24,000; outstanding checks are ₱32,000; bank service charge is ₱1,500; and a customer note collected by the bank is ₱10,500. What is the correct adjusted cash balance?',
-      options: ['₱154,000', '₱162,000', '₱145,000', '₱170,500'],
-      correctIndex: 0,
-      explanation:
-        'Bank side: ₱162,000 + Deposits in transit (₱24,000) - Outstanding checks (₱32,000) = ₱154,000. Book side: ₱145,000 + Note collected (₱10,500) - Bank service charge (₱1,500) = ₱154,000. Both sides reconcile perfectly to ₱154,000.',
-      formulaUsed:
-        '$$ \\text{Adjusted Bank} = ₱162,000 + ₱24,000 - ₱32,000 = ₱154,000 = \\text{Adjusted Book} = ₱145,000 + ₱10,500 - ₱1,500 $$',
-    },
-    {
-      title: 'Periodic Inventory - Cost of Goods Sold',
-      topic: 'FABM Accounting - Merchandising',
-      difficulty: 'Beginner',
-      problemStatement:
-        'A merchandising enterprise reports: Beginning Inventory ₱60,000; Gross Purchases ₱210,000; Purchase Discounts ₱4,000; Purchase Returns ₱6,000; Freight-In ₱10,000; and Ending Inventory ₱55,000. What is the Cost of Goods Sold?',
-      options: ['₱215,000', '₱225,000', '₱210,000', '₱205,000'],
-      correctIndex: 0,
-      explanation:
-        'Net Purchases = ₱210,000 - ₱4,000 - ₱6,000 + Freight-in ₱10,000 = ₱210,000. Goods Available for Sale (COGAS) = Beginning (₱60,000) + Net Purchases (₱210,000) = ₱270,000. COGS = COGAS (₱270,000) - Ending Inventory (₱55,000) = ₱215,000.',
-      formulaUsed:
-        '$$ \\text{COGS} = \\text{Beginning Inventory} + \\text{Net Purchases} + \\text{Freight-In} - \\text{Ending Inventory} $$',
-    },
-    {
-      title: 'Markup on Cost vs Selling Price',
-      topic: 'Business Mathematics - Commercial Markup',
-      difficulty: 'Beginner',
-      problemStatement:
-        'A bookstore buys an accounting textbook for $80.00. The store applies a 25% markup based on the SELLING PRICE. What is the retail selling price of the textbook?',
-      options: ['$106.67', '$100.00', '$120.00', '$96.00'],
-      correctIndex: 0,
-      explanation:
-        'When markup is based on selling price: Cost = Selling Price * (1 - Margin Rate). Thus, Selling Price = Cost / (1 - 0.25) = $80.00 / 0.75 = $106.67. (Note: A 25% markup on cost would give $100.00, but markup on selling price gives $106.67).',
-      formulaUsed:
-        '$$ SP = \\frac{\\text{Cost}}{1 - M_{SP}} = \\frac{\\$80.00}{1 - 0.25} = \\frac{\\$80.00}{0.75} = \\$106.67 $$',
-    },
-    {
-      title: 'Compound Interest Maturity Value',
-      topic: 'Business Mathematics - Compound Interest',
-      difficulty: 'Intermediate',
-      problemStatement:
-        'An investor deposits $50,000 in an account paying 8% nominal annual interest compounded quarterly. What is the compound amount at the end of 5 years?',
-      options: ['$74,297.37', '$70,000.00', '$73,466.40', '$76,842.10'],
-      correctIndex: 0,
-      explanation:
-        'P = $50,000, r = 0.08, n = 4 compoundings per year, t = 5 years. Total periods nt = 20. Periodic rate i = 0.08 / 4 = 0.02. A = $50,000 * (1 + 0.02)^20 = $50,000 * 1.4859474 = $74,297.37.',
-      formulaUsed:
-        '$$ A = P \\left(1 + \\frac{r}{n}\\right)^{nt} = \\$50,000 (1 + 0.02)^{20} = \\$74,297.37 $$',
-    },
-    {
-      title: 'Break-Even Analysis in Units and Sales',
-      topic: 'Business Mathematics - Break-Even Point',
-      difficulty: 'Intermediate',
-      problemStatement:
-        'A manufacturer sells units for $150 each. Variable costs are $90 per unit, and total fixed costs are $180,000 per month. How many units must be sold to break even?',
-      options: ['3,000 units', '2,000 units', '2,500 units', '4,000 units'],
-      correctIndex: 0,
-      explanation:
-        'Contribution Margin per unit = Selling Price ($150) - Variable Cost ($90) = $60. Break-Even Quantity = Fixed Costs / CM per unit = $180,000 / $60 = 3,000 units.',
-      formulaUsed:
-        '$$ Q_{BE} = \\frac{FC}{P - VC} = \\frac{\\$180,000}{\\$150 - \\$90} = 3,000 \\text{ units} $$',
-    },
-    {
-      title: 'Rational Function Vertical Asymptotes',
-      topic: 'General Mathematics - Rational Functions',
-      difficulty: 'Intermediate',
-      problemStatement:
-        'Find the vertical asymptote(s) of the rational function f(x) = (3x + 6) / (x^2 - 4x - 5).',
-      options: [
-        'x = 5 and x = -1',
-        'x = -5 and x = 1',
-        'x = 3 and x = -2',
-        'y = 0 only',
-      ],
-      correctIndex: 0,
-      explanation:
-        'Vertical asymptotes occur where the denominator equals zero while the numerator is non-zero. Factoring denominator: x^2 - 4x - 5 = (x - 5)(x + 1) = 0. Hence x = 5 and x = -1. Checking numerator at these values: 3(5)+6=21 != 0, 3(-1)+6=3 != 0. Therefore, the vertical asymptotes are x = 5 and x = -1.',
-      formulaUsed:
-        '$$ x^2 - 4x - 5 = 0 \\implies (x - 5)(x + 1) = 0 \\implies x = 5, \\, x = -1 $$',
-    },
-    {
-      title: 'Derivative via Chain Rule',
-      topic: 'Mathematics - Calculus Derivatives',
-      difficulty: 'Intermediate',
-      problemStatement:
-        'Find the first derivative of f(x) = (4x^3 - 5x)^4 with respect to x.',
-      options: [
-        '4(4x^3 - 5x)^3 * (12x^2 - 5)',
-        '(12x^2 - 5)^4',
-        '16(4x^3 - 5x)^3',
-        '4(12x^2 - 5)^3',
-      ],
-      correctIndex: 0,
-      explanation:
-        'Applying the Chain Rule: d/dx [u(x)^n] = n * u(x)^(n-1) * u\'(x). Here u(x) = 4x^3 - 5x, so u\'(x) = 12x^2 - 5. Thus f\'(x) = 4(4x^3 - 5x)^3 * (12x^2 - 5).',
-      formulaUsed:
-        '$$ \\frac{d}{dx}[u(x)^n] = n \\cdot u(x)^{n-1} \\cdot u\'(x) $$',
-    },
-    {
-      title: 'Parabola Vertex & Axis of Symmetry',
-      topic: 'Graphs & Plotting - Quadratic Curves',
-      difficulty: 'Beginner',
-      problemStatement:
-        'Find the vertex coordinate of the quadratic parabola y = 2x^2 - 8x + 3.',
-      options: [
-        '(2, -5)',
-        '(-2, 27)',
-        '(4, 3)',
-        '(2, 5)',
-      ],
-      correctIndex: 0,
-      explanation:
-        'For y = ax^2 + bx + c: Vertex x-coordinate = -b / (2a) = -(-8) / (2 * 2) = 8 / 4 = 2. Substituting x = 2: y = 2(2)^2 - 8(2) + 3 = 8 - 16 + 3 = -5. The vertex is at (2, -5).',
-      formulaUsed:
-        '$$ h = -\\frac{b}{2a} = -\\frac{-8}{2(2)} = 2, \\quad k = f(2) = 2(4) - 16 + 3 = -5 $$',
-    },
-    {
-      title: 'Straight-Line Depreciation & Book Value',
-      topic: 'FABM Accounting - Depreciation',
-      difficulty: 'Beginner',
-      problemStatement:
-        'Equipment was purchased for ₱240,000 on January 1, 2023 with an estimated useful life of 5 years and a salvage value of ₱40,000. Using straight-line depreciation, what is the accumulated depreciation after 2 years on December 31, 2024?',
-      options: ['₱80,000', '₱40,000', '₱96,000', '₱160,000'],
-      correctIndex: 0,
-      explanation:
-        'Annual Depreciation = (Cost - Salvage) / Useful Life = (₱240,000 - ₱40,000) / 5 = ₱200,000 / 5 = ₱40,000 per year. After 2 years: Accumulated Depreciation = ₱40,000 * 2 = ₱80,000. Book Value = ₱240,000 - ₱80,000 = ₱160,000.',
-      formulaUsed:
-        '$$ \\text{Annual Depr} = \\frac{\\text{Cost} - \\text{Salvage}}{\\text{Useful Life}} = \\frac{₱200,000}{5} = ₱40,000, \\quad \\text{Accum Depr} = ₱80,000 $$',
-    },
-  ];
-
-  // Select questions based on count
-  const selected: any[] = [];
-  for (let i = 0; i < count; i++) {
-    const template = questionPool[i % questionPool.length];
-    selected.push({
-      ...template,
-      id: `q_${i + 1}`,
-      title: template.title,
-    });
-  }
-
-  return {
-    id: 'quiz_' + Date.now(),
-    title: pdfFileName ? `Quiz on ${pdfFileName}` : `Cipher AI Quiz: ${topic}`,
-    topic: topic || pdfFileName || 'Mathematics & Accounting',
-    sourceType: pdfFileName ? 'pdf' : 'topic',
-    fileName: pdfFileName || undefined,
-    questionCount: selected.length,
-    difficulty,
-    questions: selected,
-    createdAt: Date.now(),
-  };
-}
 
 
 // Setup Vite middleware in dev or static serving in production
